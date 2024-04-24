@@ -44,3 +44,5 @@ python -m pdb test.py
 `whatis <variable>`查看变量属性
 
 `p <variable>`打印变量
+
+

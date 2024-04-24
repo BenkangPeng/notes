@@ -122,7 +122,7 @@ int main()
 const int N = 1e5 + 10 ;
 int q[N] ;
 int SL(int x , int l , int r){
-    //查找第一个≥x的数
+    //查找第一个≥x的数 lower_bound
     int mid ;
     while(l < r){
         mid = (l+r) >> 1 ;
@@ -424,3 +424,244 @@ public:
 ## 离散化
 
 使用场景：**值域大，但稀疏**
+
+先看离散化：[数组序号转换](https://leetcode.cn/problems/rank-transform-of-an-array/description/)
+
+这道题是将原数组中的元素映射到从1开始的编号，也就是将范围未定的元素**离散化**到自然数序列：
+
+```cpp
+class Solution {
+public:
+    vector<int> arrayRankTransform(vector<int>& arr) {
+        vector<int> temp = arr;
+        sort(arr.begin() , arr.end());
+        arr.erase(unique(arr.begin() , arr.end()) , arr.end());
+
+        vector<int> res;
+        for(int i = 0 ; i < temp.size() ; i++){
+            res.push_back(upper_bound(arr.begin() , arr.end() , temp[i]) - arr.begin() );
+        }
+
+        return res;
+    }
+};
+```
+
+```python
+class Solution:
+    def arrayRankTransform(self, arr: List[int]) -> List[int]:
+        dict = {val:i+1 for i,val in enumerate(sorted(set(arr)))}
+        return [dict[elem] for elem in arr]
+```
+
+
+
+[802. 区间和](https://www.acwing.com/problem/content/description/804/)
+
+acwing这道题的难点就在，题目让你在$a[x]$ ($x$表示数轴坐标)上进行多次加法操作，但$x$范围在$-10^9$~$10^9$ , 且不说数组索引无法为负数，就算转换到$0到2×10^9$,也开不了这么大的数组。这就需要将所有输入的$x$离散化。$a[x] += c$ 转化为$a'[x'] += c$  ,  在$[l,r]$求前缀和转换为在$[l',r']$上求前缀和。($x'、l'、r'$表示$x,l,r$离散化后对应的值)注意:
+
+* $l,r$也要加入到$x$中求离散化，这样才能保证$l',r'$在$x'$中能找到值。
+* $a[N]$中$N$开多大合适？$N$的大小要保证能装下$x ,l,r$离散化后的值，$n$,$m$的个数最大均为$10^5$,因此$N$要大于$3×10^5$
+* `std::unique`只对相邻的重复元素有效，所以在应用 unique 之前，需要对容器进行排序
+* `upper_bound_`函数的作用就是找出$x$离散化后的坐标$x'$,这里是用二分查找做的。
+
+```cpp
+#include<iostream>
+#include<vector>
+#include<algorithm>
+using namespace std;
+const int N = 3e5 + 10;
+int a[N] , s[N];
+int upper_bound_(const vector<int>& nums , int x){
+    int l = 0 , r = nums.size() - 1;
+    
+    while(l<r){
+        int mid = (l+r)>>1;
+        if(nums[mid]>=x)    r = mid;
+        else l = mid + 1;
+    }
+    return r+1;
+}
+int main()
+{
+    int n , m;
+    cin >> n >> m;
+    vector<pair<int,int>> add , query;
+    vector<int> idx;
+    for(int i = 0 ; i < n ; i++){
+        int x , c;
+        scanf("%d %d" , &x , &c);
+        add.push_back({x,c});
+        idx.push_back(x);
+    }
+
+
+    for(int i = 0 ; i < m ; i++){
+        int l , r;
+        scanf("%d %d" , &l , &r);
+        query.push_back({l,r});
+        idx.push_back(l);
+        idx.push_back(r);
+    }
+
+    sort(idx.begin() , idx.end());
+    idx.erase(unique(idx.begin() , idx.end()) , idx.end());
+
+    for(auto item : add){
+        int x = upper_bound_(idx , item.first);
+        a[x] += item.second;
+    }
+
+    for(int i = 1 ; i <= idx.size() ; ++i){
+        s[i] = s[i-1] + a[i];
+    }
+
+    for(auto item : query){
+        int l = upper_bound_(idx , item.first);
+        int r = upper_bound_(idx , item.second);
+        printf("%d\n" , s[r] - s[l-1]);
+    }
+}
+```
+
+## 区间合并
+
+[803. 区间合并](https://www.acwing.com/problem/content/805/)
+
+```cpp
+#include<iostream>
+#include<vector>
+#include<algorithm>
+using namespace std;
+
+
+int main()
+{
+    int n;
+    cin >> n;
+    vector<pair<int,int>> interval ;
+    for(int i = 0 ; i < n ; i++){
+        int l , r;
+        scanf("%d %d" , &l , &r);
+        interval.push_back({l,r});
+    }
+
+    sort(interval.begin() , interval.end());
+    int start = interval[0].first;
+    int end   = interval[0].second;
+    int cnt = 1;
+
+    for(auto item : interval){
+        if(item.first <= end && item.second > end)  end = item.second;
+        else if(item.first > end) {
+            cnt++;
+            start = item.first;
+            end   = item.second;
+        }
+    }
+    cout << cnt;
+}
+```
+
+[56. 合并区间 - 力扣（LeetCode）](https://leetcode.cn/problems/merge-intervals/description/)
+
+
+
+
+
+## 单调栈
+
+所谓的单调栈就是在将一列数依次入栈时，始终保持栈的单调性(栈底到栈顶，递增or递减)：
+
+```cpp
+template<typename T>
+stack<T> monotonic_stack(const vector<T>& a){
+    //monotonically incremental
+    stack<T> st;
+    for(auto item : a){
+        while(!st.empty() && item < st.top()){
+            st.pop();
+        }
+        st.push(item);
+    }
+    return st;
+}
+```
+
+单调栈可以用来解决`NGE`(Next Greater Element)问题，这一问题也可以扩展成`左边第一个大的元素`  `右边第一个小的元素`  `左边第一个小的元素`  `右边第一个大的元素`等问题。解决这类问题时，先要想清楚是要构造单调增的栈or单调减的栈。
+
+[830. 单调栈 - AcWing题库](https://www.acwing.com/problem/content/description/832/)
+
+这道题是求`左边第一个比它小的数` , 先想清楚是要构造一个递增的栈。
+
+```cpp
+#include<iostream>
+#include<vector>
+#include<stack>
+#include<algorithm>
+using namespace std;
+const int N = 1e5 + 10;
+int a[N];
+int main()
+{
+    int N , t;
+    cin >> N;
+    stack<int> st;
+    for(int i = 0 ; i < N ; i++){
+        scanf("%d" , &t);
+
+        while(!st.empty() && t<=st.top()){
+            st.pop();
+        }
+        if(st.empty()){
+            printf("-1 ");
+            st.push(t);
+        }
+        else{
+            printf("%d ",st.top());
+            st.push(t);
+        }
+    }
+}
+```
+
+
+
+[739. 每日温度 - 力扣（LeetCode）](https://leetcode.cn/problems/daily-temperatures/description/) 这道题是求右边第一个大的数，需要维护一个单调减的栈，而且要注意：
+
+* 求右边第一个大(或小)的数，可以从右到左遍历数组然后把结果翻转。也可以：对比栈顶元素与即将入栈元素，给出栈顶元素对应的答案。
+* 这道题是求右边第一个大的数与该数间隔的天数，所以栈里面存元素的索引，通过求差值得到间隔的天数。
+* 一些判断逻辑与`左边第一个大的数`不同
+
+```python
+class Solution:
+    def dailyTemperatures(self, temperatures: List[int]) -> List[int]:
+        st = []
+        N = len(temperatures)
+        res = [0] * N
+        for i , temp in enumerate(temperatures):
+            while st and temp > temperatures[st[-1]]:
+                top = st.pop()
+                res[top] = i - top
+
+            st.append(i)
+        
+        return res
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -83,7 +83,7 @@ $ systemctl disable firewalld
 
 ### 设置VMnet8在Windows上的IP属性
 
-![1712059162735](images/87d4e96322255f235dad3bcd8f66565a3c2173f6.png)
+![1712059162735](images/87d4e96322255f235dad3bcd8f66565a3c2173f6-17138586539091.png)
 
 IP地址依然是填子网IP范围内的值。192.168.111.0~192.168.111.255
 
