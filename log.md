@@ -440,3 +440,105 @@ Line243数据流流入SA的拍数
 :date: 20240418
 
 显示器最佳配置：1.显示器本身的“预设模式”为暖色 2. [Iris Pro](https://www.52pojie.cn/thread-1130826-1-1.html)设置为自动、健康
+
+:date:20240426
+
+我将对以下C代码进行提问。该代码是将文本文件`data_y_hw.dat`中的每一行字符串读出，并输出到终端，`data_y_hw.dat`文件内容见下。该代码执行结果满足预期效果。但我在用gdb调试时(gdb调试信息如下)，发现了一些不懂的地方，特向你请教。在while循环中，第一次循环读到的line是00040001407df47c，符合预期，但第二次循环读到的line却变成了"\n\000\060\064\060\060\060\061\064\060\067df47c"，接下来的循环也出现了类似的未知的字符串，请问这是为什么？
+```c
+#include<stdio.h>
+#include<stdlib.h>
+#include<malloc.h>
+#include<string.h>
+int main()
+{
+    char* file_path = "data_y_hw.dat";
+    FILE* fp = fopen(file_path , "r");
+
+    char line[17];
+    while(fgets(line , sizeof(line) , fp) != NULL){
+        // line[strcspn(line,"\n")] = '\0';
+        printf("%s" , line);
+    } 
+
+    fclose(fp);
+    return 0;
+}
+```
+
+data_y_hw.dat:
+
+```
+00040001407df47c
+0001000140c5aa8c
+0001000142a326d4
+0004000140b81d40
+0001000241d8ad03
+00020002c20d4bc7
+00040003c0df7eac
+00040003c0f43001
+00040003c26321c7
+00040002c046cd70
+00010004c27b2a5a
+00010004418ddd46
+```
+
+gdb调试信息：
+
+```shell
+benka@MASALab MINGW64 /d/Desktop/OnWorking/cs/cpp (master)
+$ gcc -g test.c -o test.out 
+
+benka@MASALab MINGW64 /d/Desktop/OnWorking/cs/cpp (master)
+$ gdb test.out 
+GNU gdb (GDB) 11.2
+Copyright (C) 2022 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "x86_64-w64-mingw32".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<https://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from test.out...
+(gdb) start
+Temporary breakpoint 1 at 0x1400014b1: file test.c, line 8.
+Starting program: D:\Desktop\OnWorking\cs\cpp\test.out
+[New Thread 31232.0x8b1c]
+
+Thread 1 hit Temporary breakpoint 1, main () at test.c:8
+8           char* file_path = "data_y_hw.dat";
+(gdb) n
+9           FILE* fp = fopen(file_path , "r");
+(gdb)
+12          while(fgets(line , sizeof(line) , fp) != NULL){
+(gdb)
+14              printf("%s" , line);
+(gdb) display line
+1: line = "00040001407df47c"
+(gdb) n
+00040001407df47c12          while(fgets(line , sizeof(line) , fp) != NULL){
+1: line = "00040001407df47c"
+(gdb)
+14              printf("%s" , line);
+1: line = "\n\000\060\064\060\060\060\061\064\060\067df47c"
+(gdb)
+
+12          while(fgets(line , sizeof(line) , fp) != NULL){
+1: line = "\n\000\060\064\060\060\060\061\064\060\067df47c"
+(gdb)
+14              printf("%s" , line);
+1: line = "0001000140c5aa8c"
+(gdb)
+0001000140c5aa8c12          while(fgets(line , sizeof(line) , fp) != NULL){
+1: line = "0001000140c5aa8c"
+(gdb)
+14              printf("%s" , line);
+1: line = "\n\000\060\061\060\060\060\061\064\060c5aa8c"
+```
+

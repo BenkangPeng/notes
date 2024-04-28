@@ -1,14 +1,17 @@
 # 第一章 计算机系统漫游
 
 * 信息就是位＋上下文
-* 预处理→编译→汇编→链接
+* 预处理→编译→汇编→链接：预处理是将库文件加载进源程序，例如将`iostream`库文件直接插入到程序文本中，结果得到一个新的程序文本文件,后缀通常为`.i`。编译是编译器`ccl`将程序文本`.i`文件翻译成汇编语言`.s`文件。汇编是汇编器(`as`)将`.s`文件翻译成机器指令(二进制)`.o`文件。链接将标准函数库中的`.o`合并进来，例如代码中调用了`printf`函数，链接器就要将汇编好了的`printf.o`链接进来。
 * 存储器层次结构：
 
-<img src = "https://pic3.zhimg.com/v2-37cd14433f0a64844ccd435f3b48b236_b.jpg" style = "width : 400px ; height : 400px">
+![v2-37cd14433f0a64844ccd435f3b48b236_b](images/v2-37cd14433f0a64844ccd435f3b48b236_b.png)
 
+* L4就是常说的主存(或者说内存)，L5是外存(例如固态硬盘)。
 * 进程是操作系统对一个正在运行的程序的抽象，一个系统可以同时运行多个进程，这种看上去多进程是并发进行的现象，实则是由**上下文切换**实现的。
 * 进程间的切换是由内核(kernel)管理的，内核是操作系统常驻主存的部分。
-* 一个进程可以由多个线程组成。由于多线程之间比多进程之间更容易共享数据，因此线程并行更容易实现且更高效。
+* **一个进程可以由多个线程**组成。由于多线程之间比多进程之间更容易共享数据，因此**线程并行**更容易实现且更高效。
+* **并发（Concurrency）与并行（Parallelism）**：并发指在同一时间段内，两个或多个任务都在进行，但不一定同时发生。在**单核**处理器上，只有一个任务在任意时刻真正执行，而其他任务处于暂停状态。这通过任务之间**快速切换**给予了“看似同时执行”的错觉。并行是指在同一时刻，有多个任务真正同时执行。这通常需要多核（或多处理器）系统，其中每个核心可以同时执行一个不同的任务。简而言之，并发是关于任务执行的管理和调度，并行是关于同时执行多个任务的能力。
+* **进程（Process）与线程（Thread）**：进程是系统进行资源分配和独立运行的基本单位。每个进程都有自己的独立内存空间和系统资源。线程是进程中的执行单元，是进程内部的实际运行单位，处理器调度执行的最小单位。同一进程中的线程共享该进程的内存空间和资源，这使得线程之间的通信和数据共享变得容易，但也需要处理好同步和数据一致性的问题。
 
 # 第二章 信息的表示和处理
 
@@ -23,61 +26,46 @@
 
 * IEEE 浮点表示
 
-$V = (-1)^s×M×2^E$  尾数(significand)、阶码(exponent)
+$V = (-1)^s×M×2^E$  M是尾数(significand)、E是阶码(exponent)，$M=1+f$,这种表达叫做隐含的以1开头表示(implied leading 1).$E=e-Bias , Bias = 2^{k-1}-1$,其中e是无符号数，位表示为$e_{k-1}…e_0$，$Bias$为偏置，对于单精度为127，双精度为1023.
 
 单精度浮点：32位，其中s占1位，exp占8位，frac占23位。
 
 双精度浮点：64位，其中s占1位，exp占11位，frac占52位。
 
+举例：3.14的单精度表达：①先将3.14转换为二进制表达，整数部分`3`的二进制表达为`11`,小数部分`.14`用乘二取整法得出二进制表达约为`.001001111`,所以$(3.14)_D = (11.001001111)_B$ ;②表示为规范化形式$1.xxx×2^x$的形式 ， $(11.001001111)_B = 1.1001001111×2^1$；③计算指数、尾数和符号位。符号位S=0 , 指数e = E + bias = 1 + 127 = 128 = $(1000\_0000)_2$ , 尾数M=$23'b001001111$ , 所以3.14的IEEE754 单精度表达为$0\_10000000\_00100111100000000000000$
+
+* 非规格化数：阶码全为0。此时阶码值$E=1-Bias$ , 尾数值$M=f$,也就是只有小数段的值，不包含隐含的开头的1。非规格化数可以用来表示0和非常接近0的数
+* 特殊值：阶码全为1.当小数域全为0时，表示无穷大∞ 。小数域不为0时，表示NaN(Not a Number).
+
 ```cpp
 #include<iostream>
-
 typedef unsigned char *byte_pointer ;
-
 void show_bytes(byte_pointer start , size_t len){
-
     size_t i ;
-
     for(i = 0 ; i < len ; i++){
-
         std::printf("%.2x  " , start[i]) ;
-
     }
-
     std::cout << std::endl ;
-
 }
 
 void show_int(int x){
-
     show_bytes((byte_pointer)&x , sizeof(int)) ;
-
 }
 
 void show_float(float x){
-
     show_bytes((byte_pointer)&x , sizeof(float)) ;
-
 }
 
 void show_pointer(int* x){
-
     show_bytes((byte_pointer)&x , sizeof(int)) ;
-
 }
 
 void test_show_bytes(int val){
-
     int ival = val ;
-
     float fval = (float)val ;
-
     int *pval = &ival ;
-
     show_int(ival) ;
-
     show_float(fval) ;
-
     show_pointer(pval) ;
 
 }
@@ -131,3 +119,50 @@ char *p_char = (char*) &x ;
 > address 61fdff 's content is ffffffff
 
 因为`char`会输出负数前缀`ffffff`
+
+
+
+
+
+```makefile
+# 指定编译器
+CC=gcc
+# 指定普通编译时的编译选项，使用-O2进行优化
+CFLAGS=-O2
+# 为GDB调试准备的编译选项，添加调试信息
+DEBUGFLAGS=-g
+
+# 目标可执行文件名
+TARGET=app
+
+# 默认目标：编译项目
+all: \$(TARGET)
+
+# 编译目标：将main.c编译为可执行文件app
+\$(TARGET): main.c
+	\$(CC) \$(CFLAGS) main.c -o \$(TARGET)
+
+# 运行目标：执行编译出的程序
+run: \$(TARGET)
+	./\$(TARGET)
+
+# 用于调试的特别编译目标，额外添加了-g选项
+\$(TARGET)-debug: main.c
+	\$(CC) \$(DEBUGFLAGS) main.c -o \$(TARGET)
+
+# 调试目标：使用GDB调试程序
+debug: \$(TARGET)-debug
+	gdb ./\$(TARGET)
+
+# 清除目标：删除编译产物
+clean:
+	rm -f \$(TARGET) \$(TARGET)-debug
+
+.PHONY: all run debug clean
+
+```
+
+
+
+
+
