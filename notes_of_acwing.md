@@ -651,6 +651,69 @@ class Solution:
 
 
 
+### KMP
+
+```cpp
+#include<iostream>
+#include<string>
+#include<vector>
+#include<algorithm>
+using namespace std;
+
+vector<int> get_next(const string& P){
+    int len = P.size();
+    if(len == 1)    return {-1};
+    vector<int> next(len+1);
+    next[0] = -1 , next[1] = 0;
+
+    int i = 2 , cn = 0;
+    while(i <= len){
+        if(P[i-1] == P[cn]){
+            next[i++] = ++cn;
+        }
+        else if(cn > 0){
+            cn = next[cn];
+        }
+        else next[i++] = 0;
+    }
+
+    return next;
+}
+
+void kmp_(const string& S , int M , const string& P , int N){
+    vector<int> next = get_next(P);
+    // vector<int> res;
+    
+
+    int i = 0 , j = 0 ;
+    while(i < M){
+        if(S[i] == P[j]){
+            i++ , j++;
+        }
+        else if(j == 0){
+            i++;
+        }
+        else{
+            j = next[j];
+        }
+
+        if(j == N){
+            printf("%d " , i-j);
+            j = next[j];
+        }
+    }
+
+}
+
+int main()
+{
+    int N , M ;
+    string P , S;
+    std::cin >> N >> P >> M >> S;
+    kmp_(S , M , P , N);
+}
+```
+
 
 
 
