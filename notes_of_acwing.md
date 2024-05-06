@@ -651,17 +651,211 @@ class Solution:
 
 
 
+## 单调队列
+
+* 单调队列常用于解决**滑动窗口**问题
+
+[239. 滑动窗口最大值 - 力扣（LeetCode）](https://leetcode.cn/problems/sliding-window-maximum/description/)
+
+```cpp
+vector<int> maxSlidingWindow(vector<int>& nums, int k) {
+        int len = nums.size();
+        deque<int> q;
+        vector<int> res;
+
+        for(int i = 0 ; i < len ; i++){
+            while(q.size() && nums[i] > q.back()){
+                q.pop_back();
+            }
+
+            q.push_back(nums[i]);
+            if(i >= k && q.front() == nums[i-k])  q.pop_front();
+            if(i >= k-1)    res.push_back(q.front());  
+        }
+
+        return res;
+    }
+```
+
+* 注意在弹出窗口最前端的数时，需要判断`q.front() == nums[i-k]`,因为`q.front()`不一定是窗口最前端需要弹出的数。
 
 
 
+## KMP
+
+`KMP`常用于寻找一个字符串中是否包含子串。
+
+[28. 找出字符串中第一个匹配项的下标 - 力扣（LeetCode）](https://leetcode.cn/problems/find-the-index-of-the-first-occurrence-in-a-string/description/)
+
+暴力做法肯定是遍历母串中每一个元素开始的字符串，寻找是否有与子串相同的部分：
+
+```cpp
+int strStr(string haystack, string needle) {
+        int len_hay = haystack.size() , len_needle = needle.size();
+
+        if(len_hay < len_needle)    return -1;
+        for(int i = 0  , j = 0; i < len_hay ; i++){
+            int k = i; 
+            while(haystack[k] == needle[j] && i < len_hay && j < len_needle){
+                k++ , j++;
+            }
+
+            if(j == len_needle) return i;
+            else {
+                j = 0;
+            }
+        }
+        return -1;
+    }
+```
+
+* 暴力解法的缺点在于`i`指针需要不断回溯，时间复杂度为$O(n^2)$ 但实际上，`i`指针无需回溯，见下图：
+
+![KMP](images/KMP.png)
+
+**KMP的做法**
+
+* 字符串S的指针`i`不会回溯：当比较进行到`S[3] != P[3]`时，`i`指针不回溯，`j`指针回溯到`next[j]`处，即`j = next[j]`，再继续对比下去。时间复杂度为$O(n)$
+* `next`数组是什么？为什么`j`回溯到`next[j]`?   `next`数组是当前元素前的字符串的最长公共前后缀。例如上图左下角的字符串`ababab`，第一个元素`str[0] = a`的`next[0] = -1` , 因为`str[0]`之前没有字符串，也没有前后缀；`str[1] = b`之前的字符串为`a`，前后缀是重合的，`next[1] = 0` ;可见`next`数组前两项为`-1  0` ; `str[2] = a`前的字符是`ab`， 没有公共前后缀，`next[2] = 0` ; `str[3] = b`前的字符串是`aba`，最长公共前后缀分别为`a`和`a` , `next[2] = 1`
+* 求`next`的算法：
+
+```cpp
+ vector<int> get_next(const string& needle){
+        int m = needle.size();
+        if(m == 1)  return {-1};
+        vector<int> next(m);
+        next[0] = -1;
+        next[1] = 0;
+        int i = 2 , cn = 0;
+
+        while(i < m){
+            if(needle[i-1] == needle[cn]){
+                next[i++] = ++cn;
+            }
+            else if(cn > 0){
+                cn = next[cn];
+            }
+            else    next[i++] = 0;
+        }
+
+        return next;
+ 	}
+```
+
+* 完整`kmp`:
+
+```cpp
+class Solution{
+public:
+    vector<int> get_next(const string& needle){
+        int m = needle.size();
+        if(m == 1)  return {-1};
+        vector<int> next(m);
+        next[0] = -1;
+        next[1] = 0;
+        int i = 2 , cn = 0;
+
+        while(i < m){
+            if(needle[i-1] == needle[cn]){
+                next[i++] = ++cn;
+            }
+            else if(cn > 0){
+                cn = next[cn];
+            }
+            else    next[i++] = 0;
+        }
+
+        return next;
+    }
 
 
 
+    int strStr(string haystack , string needle){
+        vector<int> next = get_next(needle);
+        int len_hay = haystack.size() , len_needle = needle.size();
+        if(len_hay < len_needle) return -1;
 
 
+        int i = 0 , j = 0;
+        while(i < len_hay && j < len_needle){
+            if(haystack[i] == needle[j]){
+                i++ , j++;
+            }
+            else if(j == 0){
+                i++;
+            }
+            else {
+                j = next[j];
+            }
+        }
+        if(i == len_hay && j != len_needle) return -1;
+        else return i - j;
+    }
+};
+```
 
+[831. KMP字符串 - AcWing题库](https://www.acwing.com/problem/content/description/833/)
 
+`AcWing`的这道题需要考虑子串在母串中多次出现的情况，这时完成一次匹配后仍需继续匹配:
 
+```cpp
+#include<iostream>
+#include<string>
+#include<vector>
+#include<algorithm>
+using namespace std;
 
+vector<int> get_next(const string& P){
+    int len = P.size();
+    if(len == 1)    return {-1};
+    vector<int> next(len+1);
+    next[0] = -1 , next[1] = 0;
 
+    int i = 2 , cn = 0;
+    while(i <= len){
+        if(P[i-1] == P[cn]){
+            next[i++] = ++cn;
+        }
+        else if(cn > 0){
+            cn = next[cn];
+        }
+        else next[i++] = 0;
+    }
+
+    return next;
+}
+
+void kmp_(const string& S , int M , const string& P , int N){
+    vector<int> next = get_next(P);
+    // vector<int> res;
+    
+
+    int i = 0 , j = 0 ;
+    while(i < M){
+        if(S[i] == P[j]){
+            i++ , j++;
+        }
+        else if(j == 0){
+            i++;
+        }
+        else{
+            j = next[j];
+        }
+
+        if(j == N){
+            printf("%d " , i-j);
+            j = next[j];
+        }
+    }
+
+}
+
+int main()
+{
+    int N , M ;
+    string P , S;
+    std::cin >> N >> P >> M >> S;
+    kmp_(S , M , P , N);
+}
+```
 

@@ -542,3 +542,23 @@ Thread 1 hit Temporary breakpoint 1, main () at test.c:8
 1: line = "\n\000\060\061\060\060\060\061\064\060c5aa8c"
 ```
 
+
+
+
+
+```c
+M= 4;
+K =4;
+N =4;
+row block = M;
+float sparsity =0.7;
+int structuredSparsity;
+for(int i=0 ;i<argc; i++){
+    if(i==1){sscanf(argv[1l,"SU"&M);
+      else if(i=-2){sscanf(argv[2],"%u"，&K);
+      else if(i==3){sscanf(argv[3],"%u",&N);
+      else if(i==4){sscanf(argv[4],"%f"&sparsity);}
+      else if(i==5){ 			 scanf(argv[5l,"%d",&rowblock);}
+                                            else if(i==6){scanf(argv[6],&structuredSparsity;}
+```
+
