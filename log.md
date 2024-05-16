@@ -484,81 +484,36 @@ data_y_hw.dat:
 
 gdb调试信息：
 
+
+
+
+
+:date:20240508
+
+
+
+4015ae78bb2b1a10
+
+100_0000_0101_1011_0011_0001_1100_1010_1111_0101_0100_0110_0000_1011_0011_0100
+
+
+
+
+
+
+
 ```shell
-benka@MASALab MINGW64 /d/Desktop/OnWorking/cs/cpp (master)
-$ gcc -g test.c -o test.out 
+set clk_period 1.2
+create_clock -name {clk} -period $clk_period -waveform [list 0 [expr ($clk_period/2)]] [get_ports {clk}]
+set_input_delay 0 -clock clk [get_ports {clk rstn}]
+set_clock_transition 0.05 [all_clocks]
+set_input_transition 0.05 [remove_from_collection [all_inputs] {clk rstn}]
 
-benka@MASALab MINGW64 /d/Desktop/OnWorking/cs/cpp (master)
-$ gdb test.out 
-GNU gdb (GDB) 11.2
-Copyright (C) 2022 Free Software Foundation, Inc.
-License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
-This is free software: you are free to change and redistribute it.
-There is NO WARRANTY, to the extent permitted by law.
-Type "show copying" and "show warranty" for details.
-This GDB was configured as "x86_64-w64-mingw32".
-Type "show configuration" for configuration details.
-For bug reporting instructions, please see:
-<https://www.gnu.org/software/gdb/bugs/>.
-Find the GDB manual and other documentation resources online at:
-    <http://www.gnu.org/software/gdb/documentation/>.
+set_load 0.06 [all_outputs]
 
-For help, type "help".
-Type "apropos word" to search for commands related to "word"...
-Reading symbols from test.out...
-(gdb) start
-Temporary breakpoint 1 at 0x1400014b1: file test.c, line 8.
-Starting program: D:\Desktop\OnWorking\cs\cpp\test.out
-[New Thread 31232.0x8b1c]
+set scale_clk 0.15
 
-Thread 1 hit Temporary breakpoint 1, main () at test.c:8
-8           char* file_path = "data_y_hw.dat";
-(gdb) n
-9           FILE* fp = fopen(file_path , "r");
-(gdb)
-12          while(fgets(line , sizeof(line) , fp) != NULL){
-(gdb)
-14              printf("%s" , line);
-(gdb) display line
-1: line = "00040001407df47c"
-(gdb) n
-00040001407df47c12          while(fgets(line , sizeof(line) , fp) != NULL){
-1: line = "00040001407df47c"
-(gdb)
-14              printf("%s" , line);
-1: line = "\n\000\060\064\060\060\060\061\064\060\067df47c"
-(gdb)
-
-12          while(fgets(line , sizeof(line) , fp) != NULL){
-1: line = "\n\000\060\064\060\060\060\061\064\060\067df47c"
-(gdb)
-14              printf("%s" , line);
-1: line = "0001000140c5aa8c"
-(gdb)
-0001000140c5aa8c12          while(fgets(line , sizeof(line) , fp) != NULL){
-1: line = "0001000140c5aa8c"
-(gdb)
-14              printf("%s" , line);
-1: line = "\n\000\060\061\060\060\060\061\064\060c5aa8c"
-```
-
-
-
-
-
-```c
-M= 4;
-K =4;
-N =4;
-row block = M;
-float sparsity =0.7;
-int structuredSparsity;
-for(int i=0 ;i<argc; i++){
-    if(i==1){sscanf(argv[1l,"SU"&M);
-      else if(i=-2){sscanf(argv[2],"%u"，&K);
-      else if(i==3){sscanf(argv[3],"%u",&N);
-      else if(i==4){sscanf(argv[4],"%f"&sparsity);}
-      else if(i==5){ 			 scanf(argv[5l,"%d",&rowblock);}
-                                            else if(i==6){scanf(argv[6],&structuredSparsity;}
+set_input_delay [expr $scale_clk * $clk_period] -clock clk [remove_from_collection [all_inputs] {clk rstn}]
+set_output_delay [expr $scale_clk * $clk_period] -clock clk [all_outputs]
 ```
 
