@@ -651,7 +651,216 @@ class Solution:
 
 
 
-### KMP
+## 单调队列
+
+* 单调队列常用于解决**滑动窗口**问题
+
+[239. 滑动窗口最大值 - 力扣（LeetCode）](https://leetcode.cn/problems/sliding-window-maximum/description/)
+
+```cpp
+vector<int> maxSlidingWindow(vector<int>& nums, int k) {
+        int len = nums.size();
+        deque<int> q;
+        vector<int> res;
+
+        for(int i = 0 ; i < len ; i++){
+            while(q.size() && nums[i] > q.back()){
+                q.pop_back();
+            }
+
+            q.push_back(nums[i]);
+            if(i >= k && q.front() == nums[i-k])  q.pop_front();
+            if(i >= k-1)    res.push_back(q.front());  
+        }
+
+        return res;
+    }
+```
+
+* 注意在弹出窗口最前端的数时，需要判断`q.front() == nums[i-k]`,因为`q.front()`不一定是窗口最前端需要弹出的数。
+
+
+
+## KMP
+
+`KMP`常用于寻找一个字符串中是否包含子串。
+
+[28. 找出字符串中第一个匹配项的下标 - 力扣（LeetCode）](https://leetcode.cn/problems/find-the-index-of-the-first-occurrence-in-a-string/description/)
+
+暴力做法肯定是遍历母串中每一个元素开始的字符串，寻找是否有与子串相同的部分：
+
+```cpp
+int strStr(string haystack, string needle) {
+        int len_hay = haystack.size() , len_needle = needle.size();
+
+        if(len_hay < len_needle)    return -1;
+        for(int i = 0  , j = 0; i < len_hay ; i++){
+            int k = i; 
+            while(haystack[k] == needle[j] && i < len_hay && j < len_needle){
+                k++ , j++;
+            }
+
+            if(j == len_needle) return i;
+            else {
+                j = 0;
+            }
+        }
+        return -1;
+    }
+```
+
+* 暴力解法的缺点在于`i`指针需要不断回溯，时间复杂度为$O(n^2)$ 但实际上，`i`指针无需回溯，见下图：
+
+![KMP](images/KMP.png)
+
+**KMP的做法**
+
+* 字符串S的指针`i`不会回溯：当比较进行到`S[3] != P[3]`时，`i`指针不回溯，`j`指针回溯到`next[j]`处，即`j = next[j]`，再继续对比下去。时间复杂度为$O(n)$
+* `next`数组是什么？为什么`j`回溯到`next[j]`?   `next`数组是当前元素前的字符串的最长公共前后缀。例如上图左下角的字符串`ababab`，第一个元素`str[0] = a`的`next[0] = -1` , 因为`str[0]`之前没有字符串，也没有前后缀；`str[1] = b`之前的字符串为`a`，前后缀是重合的，`next[1] = 0` ;可见`next`数组前两项为`-1  0` ; `str[2] = a`前的字符是`ab`， 没有公共前后缀，`next[2] = 0` ; `str[3] = b`前的字符串是`aba`，最长公共前后缀分别为`a`和`a` , `next[2] = 1`
+* 求`next`的算法：
+
+**证明next数组的求法：**
+$$
+求next[k] , 令cn = next[k-1]\\
+判断str[k-1] == str[cn]\\
+①true: str[k-1] = str[cn]\\
+由next[k-1] = cn \\
+\rarr str[0:cn-1] = str[k-cn-1:k-2](即str[k-1]前长度为cn的前后缀相同)\\
+又str[k-1] = str[cn]\\
+\rarr str[0:cn] = str[k-cn-1:k-1]\\
+\therefore next[k] = cn + 1\\
+②false: str[k-1] \neq str[cn]\\
+令cn = next[cn]\\
+判断str[k-1] == str[cn]\\
+true:\   \because str[0:cn-1] = str[k-cn-1:k-2]\\
+又str[cn] = str[k-1]\\
+\rarr str[0:cn] = str[k-cn-1:k-1]\\
+\rarr next[k] = cn+1
+$$
+注：
+
+* `next[k]`是否可以大于`cn+1` ？ 不可能。可以反证：若`next[k] = cn+2`,则`str[0:cn+1] = str[k-cn-2:k-1]` , 也有`str[0:cn] = str[k-cn-2:k-2]` $\rarr$ `next[k-1] = cn + 1` 与`next[k-1] = cn`矛盾。类似的，`next[k] = cn+3 , cn+4……`不成立，`next[k]`只能满足$next[k] \leq cn+1$ 
+
+* 由上面这一点$next[k] \leq cn+1$ , 因此是去判断`str[k-1]是否与str[cn]`相等，而不是：$str[k-1] == str[x] , x > cn$
+* 判断失败后$$str[k-1] \neq str[cn]$$ , 继续迭代$str[k-1] == str[next[cn]]$.  求next数组本质是在迭代：$$str[k-1] == str[next[k-1]] , str[k-1] == str[next[next[k-1]]]$$……
+
+```cpp
+ vector<int> get_next(const string& needle){
+        int m = needle.size();
+        if(m == 1)  return {-1};
+        vector<int> next(m);
+        next[0] = -1;
+        next[1] = 0;
+        int i = 2 , cn = 0;
+
+        while(i < m){
+            if(needle[i-1] == needle[cn]){
+                next[i++] = ++cn;
+            }
+            else if(cn > 0){
+                cn = next[cn];
+            }
+            else    next[i++] = 0;
+        }
+
+        return next;
+ 	}
+```
+
+
+
+
+**证明为什么`i`指针无需回溯，`j`指针只要回溯到`next[j]`处：**
+$$
+若s为母串，p为子串，i为s的指针，j为p的指针，此时发生不匹配，有\\
+s[i] \neq p[j] \ 且\ s[i-j : i-1] = p[0:j-1]① \\
+设next[j] = cn,\ 则有p[0:cn-1] = p[j-cn:j-1]② \\
+由最长公共前后缀的性质：最长公共前后缀长度不大于整个字符串可知cn < j③\\
+由①③两式可推出s[i-cn:i-1] = p[j-cn:j-1]④\\
+由②④两式得s[i-cn:i-1] = p[0:cn-1],也就是说p的前cn个字符已经与s匹配\\
+只需继续匹配s[i] == p[cn],因此j指针需要回溯到cn,next[j]\\
+证毕
+$$
+
+
+* 完整`kmp`:
+
+```cpp
+class Solution{
+public:
+    vector<int> get_next(const string& needle){
+        int m = needle.size();
+        if(m == 1)  return {-1};
+        vector<int> next(m);
+        next[0] = -1;
+        next[1] = 0;
+        int i = 2 , cn = 0;
+
+        while(i < m){
+            if(needle[i-1] == needle[cn]){
+                next[i++] = ++cn;
+            }
+            else if(cn > 0){
+                cn = next[cn];
+            }
+            else    next[i++] = 0;
+        }
+
+        return next;
+    }
+
+
+
+    int strStr(string haystack , string needle){
+        vector<int> next = get_next(needle);
+        int len_hay = haystack.size() , len_needle = needle.size();
+        if(len_hay < len_needle) return -1;
+
+
+        int i = 0 , j = 0;
+        while(i < len_hay && j < len_needle){
+            if(haystack[i] == needle[j]){
+                i++ , j++;
+            }
+            else if(j == 0){
+                i++;
+            }
+            else {
+                j = next[j];
+            }
+        }
+        if(i == len_hay && j != len_needle) return -1;
+        else return i - j;
+    }
+};
+```
+
+* 有时会把求`next`数组的循环写成：
+
+```cpp
+while(i < m){
+    int cn = next[i-1];
+    if(p[i-1] == p[cn]){
+		next[i++] = cn + 1;
+    }
+    else if(cn > 0){
+		cn = next[cn];
+    }
+    else{
+		next[i++] = 0;
+    }
+}
+```
+
+这样写的内核是正确的，即每次判断`p[i-1] == p[next[i-1]]`, 但如果这个条件不成立，之后的`else`就没用了，在下一次循环中`cn`会被`next[i-1]`覆盖。还是利用`cn`每次最多加一的特性写吧。
+
+* 第二个选择判断`else if(cn > 0)`易写成`else if(cn >= 0)`  实际上若`cn`=0，那么`cn` = next[cn] = -1 , 下次访问`p[cn]`就会越界。
+
+
+
+[831. KMP字符串 - AcWing题库](https://www.acwing.com/problem/content/description/833/)
+
+`AcWing`的这道题需要考虑子串在母串中多次出现的情况，这时完成一次匹配后仍需继续匹配，因此`next`数组要多求一位:
 
 ```cpp
 #include<iostream>
@@ -714,17 +923,4 @@ int main()
 }
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+`C++`的`algorithm`库中有`search`函数，用于搜索子串在母串中第一次出现的位置。时间复杂度是O(m*n)，即朴素算法。

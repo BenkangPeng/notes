@@ -59,6 +59,7 @@ add_range (low=1, high=100) at test.cpp:5
 * **打印参数值**
   * `i locals`显示当前栈帧变量信息
   * `p <variable>` 打印变量
+  * `p *a@10` 打印数组前10个变量
   * `set var <variable> = <data>`修改变量
 
 ```shell

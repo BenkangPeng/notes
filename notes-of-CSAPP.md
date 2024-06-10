@@ -124,45 +124,5 @@ char *p_char = (char*) &x ;
 
 
 
-```makefile
-# 指定编译器
-CC=gcc
-# 指定普通编译时的编译选项，使用-O2进行优化
-CFLAGS=-O2
-# 为GDB调试准备的编译选项，添加调试信息
-DEBUGFLAGS=-g
-
-# 目标可执行文件名
-TARGET=app
-
-# 默认目标：编译项目
-all: \$(TARGET)
-
-# 编译目标：将main.c编译为可执行文件app
-\$(TARGET): main.c
-	\$(CC) \$(CFLAGS) main.c -o \$(TARGET)
-
-# 运行目标：执行编译出的程序
-run: \$(TARGET)
-	./\$(TARGET)
-
-# 用于调试的特别编译目标，额外添加了-g选项
-\$(TARGET)-debug: main.c
-	\$(CC) \$(DEBUGFLAGS) main.c -o \$(TARGET)
-
-# 调试目标：使用GDB调试程序
-debug: \$(TARGET)-debug
-	gdb ./\$(TARGET)
-
-# 清除目标：删除编译产物
-clean:
-	rm -f \$(TARGET) \$(TARGET)-debug
-
-.PHONY: all run debug clean
-
-```
-
-
-
 
 

@@ -42,6 +42,18 @@ fi
 
 **乘法需用`\*`转义表示**
 
+找到一个新方法进行运算,用`$(())`：
+
+```shell
+#!/usr/bin/bash
+echo "hello"
+a=1
+b=2
+c=6
+d=$((c/b+c*b+a))
+echo $d
+```
+
 
 
 ### **关系运算符**
@@ -107,7 +119,19 @@ for loop in 1 2 3 4 5
 do 
     echo "loop is $loop"
 done
+
+for loop in {1..10}
+do
+	echo "loop is $loop"
+done
+
+for x in C++ Python Rust
+do
+	echo $x
+done
 ```
+
+
 
 ### while循环
 
@@ -116,7 +140,7 @@ int=5
 while [ $int -ge 0 ]
 do
     echo "int = $int"
-    let "int--"
+    ((int--)) 
 done
 ```
 
