@@ -1,3 +1,23 @@
+### C++测时模板
+
+```cpp
+#include<iostream>
+#include<chrono>
+typedef std::chrono::high_resolution_clock Clock;
+
+int main()
+{
+    auto start = Clock::now();
+    //your test program
+    auto end = Clock::now();
+    std::cout << "Time taken: "
+		<< std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count()
+		<< " nanoseconds" << std::endl;
+}
+```
+
+可以去https://ideone.com/ (geeks for geeks同款)运行程序，排除机器变量干扰。
+
 ### C++矩阵运算(运算符重载)
 
 [Link](https://mp.weixin.qq.com/s/C1c5XChVyVT4OSeNvpmaqQ)
@@ -601,3 +621,316 @@ int main(){
     return 0;
 }
 ```
+
+
+
+
+
+### Virtual function & 多态
+
+虚函数是实现类多态的一种方法：
+
+```cpp
+// C++ program to illustrate
+// concept of Virtual Functions
+
+#include <iostream>
+using namespace std;
+
+class base {
+public:
+	virtual void print() { cout << "print base class\n"; }
+
+	void show() { cout << "show base class\n"; }
+};
+
+class derived : public base {
+public:
+	void print() { cout << "print derived class\n"; }//对base类中的print方法进行重载
+
+	void show() { cout << "show derived class\n"; }//base中show()方法不是虚函数，无法重载
+};
+
+int main()
+{
+	base* bptr = new derived;
+
+	// Virtual function, binded at runtime
+	bptr->print();//print derived class\n
+
+	// Non-virtual function, binded at compile time
+	bptr->show();//show base class\n
+
+	return 0;
+}
+```
+
+* 每个包含虚函数的类都有一个虚函数表（vtable），这是为了支持运行时多态。虚函数表是一个指向函数指针的数组，这些函数指针对应于类中的每个虚函数。通过这个机制，程序可以在运行时根据对象的实际类型来调用正确的函数。
+* **VTable & VPtr :** 
+  1. **虚拟函数表（VTable）**：当一个类中声明了虚函数（virtual method），编译器会为这个类创建一个虚拟函数表（VTable）。这个表中存储了类中所有虚函数的地址。
+  2. **虚拟指针（VPtr）**：编译器还会为每个类实例创建一个虚拟指针（VPtr），并将其初始化为指向该类的VTable。
+  3. **VTable的共享**：一个类的VTable是所有该类实例共享的，也就是说，编译器只为这个类创建一个VTable实例，然后所有该类的对象都共享这个VTable。
+  4. **VPtr的独立性**：尽管VTable是共享的，但每个类实例都有自己的VPtr。
+  5. **类对象大小**：如果一个类对象至少包含一个虚函数，那么这个对象的大小将是该类数据成员的大小加上VPtr的大小。在C++中，可以通过sizeof操作符来获取这个大小
+* 多态函数的解析是在运行时(runtime)完成的。(不像一般函数是在编译时完成解析。)
+* 虚函数不能是静态函数(static)
+* 应该使用基类类型的**指针或引用**来**访问虚函数**，以实现运行时多态性。
+* 指向`derived`的指针可以是`base`(基类)类型 (`base* bptr = new derived;`) , 在执行`bptr->print()`时首先会尝试执行`base类`中的`print`方法，当发觉`base::print()`函数是虚函数时，会从虚函数地址表中查找`derived::print()`的地址去执行`derived::print()`。而`base::show()`不是虚函数，编译器不会从虚函数表中查找`derived::show()`(虚函数表中也没有该地址)，因此`bptr->show`执行的是`base::show()`。
+* 下面是一个体现运行时多态的便利性的例子：
+
+```cpp
+#include <iostream>
+
+// 基类 Shape
+class Shape {
+public:
+    // 虚析构函数确保派生类的资源被正确释放
+    virtual ~Shape() {}
+
+    // 纯虚函数 Draw，定义了一个接口
+    virtual void Draw() const = 0;
+};
+
+// 派生类 Circle
+class Circle : public Shape {
+public:
+    void Draw() const override {
+        std::cout << "Drawing a circle." << std::endl;
+    }
+};
+
+// 派生类 Rectangle
+class Rectangle : public Shape {
+public:
+    void Draw() const override {
+        std::cout << "Drawing a rectangle." << std::endl;
+    }
+};
+int main() {
+    // 创建一个 Shape 指针数组
+    Shape* shapes[2];
+    shapes[0] = new Circle();
+    shapes[1] = new Rectangle();
+
+    // 通过 Shape 指针调用 Draw 函数
+    for (auto shape : shapes) {
+        shape->Draw();  // 动态绑定到正确的 Draw 实现
+    }
+
+    // 清理资源
+    for (auto shape : shapes) {
+        delete shape;
+    }
+
+    return 0;
+}
+```
+
+- 在 `main` 函数中，我们创建了一个 `Shape` 指针数组 `shapes`，并将 `Circle` 和 `Rectangle` 对象的地址存入其中。
+- 当我们通过 `Shape` 指针调用 `Draw()` 时，实际上会调用 `Circle` 或 `Rectangle` 中的 `Draw()` 方法。这是因为 `Draw()` 是虚函数，编译器会在运行时根据对象的实际类型来决定调用哪个版本的 `Draw()`
+- 如果将来需要添加新的图形类型（例如 `Triangle`），只需要创建一个新的派生类并实现 `Draw()` 方法即可。不需要修改现有的代码，就可以将新的图形类型加入到系统中。这种设计使得系统更加灵活和易于维护。
+
+**但虚函数带来的查表开销也是较大的，因此可以通过CRTP这种设计模式来避免**
+
+### CRTP(Curiously recurring template pattern)
+
+[reference](https://www.geeksforgeeks.org/curiously-recurring-template-pattern-crtp-2/)
+
+以下的例子展示了当虚函数被大量调用时所带来的开销：
+
+```cpp
+// A simple C++ program to demonstrate run-time
+// polymorphism
+#include <chrono>
+#include <iostream>
+using namespace std;
+
+typedef std::chrono::high_resolution_clock Clock;
+
+// To store dimensions of an image
+class Dimension {
+public:
+	Dimension(int _X, int _Y)
+	{
+		mX = _X;
+		mY = _Y;
+	}
+
+private:
+	int mX, mY;
+};
+
+// Base class for all image types
+class Image {
+public:
+	virtual void Draw() = 0;//虚函数等于0，表示该类的任何派生类都要重新定义Draw()
+	virtual Dimension GetDimensionInPixels() = 0;
+
+protected:
+	int dimensionX;
+	int dimensionY;
+};
+
+// For Tiff Images
+class TiffImage : public Image {
+public:
+	void Draw() {}
+	Dimension GetDimensionInPixels()
+	{
+		return Dimension(dimensionX, dimensionY);
+	}
+};
+
+// There can be more derived classes like PngImage,
+// BitmapImage, etc
+
+// Driver code that calls virtual function
+int main()
+{
+	// An image type
+	Image* pImage = new TiffImage;
+
+	// Store time before virtual function calls
+	auto then = Clock::now();
+
+	// Call Draw 1000 times to make sure performance
+	// is visible
+	for (int i = 0; i < 1000; ++i)
+		pImage->Draw();
+
+	// Store time after virtual function calls
+	auto now = Clock::now();
+
+	cout << "Time taken: "
+		<< std::chrono::duration_cast<std::chrono::nanoseconds>(now - then).count()
+		<< " nanoseconds" << endl;
+
+	return 0;
+}
+
+```
+
+Output : 
+
+```
+Time taken: 2613 nanoseconds
+```
+
+When a method is declared virtual, compiler secretly does two things for us: 
+
+1. Defines a VPtr in first 4 bytes of the class object
+2. Inserts code in constructor to initialize VPtr to point to the VTable
+
+
+
+**采用CRTP方法来实现多态** ：
+
+```cpp
+// Image program (similar to above) to demonstrate
+// working of CRTP
+#include <chrono>
+#include <iostream>
+using namespace std;
+
+typedef std::chrono::high_resolution_clock Clock;
+
+// To store dimensions of an image
+class Dimension {
+public:
+	Dimension(int _X, int _Y)
+	{
+		mX = _X;
+		mY = _Y;
+	}
+
+private:
+	int mX, mY;
+};
+
+// Base class for all image types. The template
+// parameter T is used to know type of derived
+// class pointed by pointer.
+template <class T>
+class Image {
+public:
+	void Draw()
+	{
+		// Dispatch call to exact type
+		static_cast<T*>(this)->Draw();
+	}
+	Dimension GetDimensionInPixels()
+	{
+		// Dispatch call to exact type
+		static_cast<T*>(this)->GetDimensionInPixels();
+	}
+
+protected:
+	int dimensionX, dimensionY;
+};
+
+// For Tiff Images
+class TiffImage : public Image<TiffImage> {
+public:
+	void Draw()
+	{
+		// Uncomment this to check method dispatch
+		// cout << "TiffImage::Draw() called" << endl;
+	}
+	Dimension GetDimensionInPixels()
+	{
+		return Dimension(dimensionX, dimensionY);
+	}
+};
+
+// There can be more derived classes like PngImage,
+// BitmapImage, etc
+
+// Driver code
+int main()
+{
+	// An Image type pointer pointing to Tiffimage
+	Image<TiffImage>* pImage = new TiffImage;
+
+	// Store time before virtual function calls
+	auto then = Clock::now();
+
+	// Call Draw 1000 times to make sure performance
+	// is visible
+	for (int i = 0; i < 1000; ++i)
+		pImage->Draw();
+
+	// Store time after virtual function calls
+	auto now = Clock::now();
+
+	cout << "Time taken: "
+		<< std::chrono::duration_cast<std::chrono::nanoseconds>(now - then).count()
+		<< " nanoseconds" << endl;
+
+	return 0;
+}
+```
+
+Output :
+
+```
+Time taken: 732 nanoseconds
+```
+
+* `Image<TiffImage>* pImage = new TiffImage;`  
+
+执行`pImage->Draw();`时，编译器会先找`Image`类，执行`Image::Draw()`  : `static_cast<TiffImage*>(this)->GetDimensionInPixels();`将`this`指针转成`TiffImage*`型，再去访问`TiffImage::GetDimensionInPixels()`
+
+* CRTP是静态绑定，它通过模板实现多态，在编译时就已经确定了要调用的具体函数，而不是在运行时。
+
+
+
+
+
+
+
+
+
+
+
+
+
