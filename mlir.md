@@ -19,7 +19,7 @@ func.func @main(%arg0: i32) -> i32 {
 
 
 
-# MLIR — Writing Our First Pass[https://www.jeremykun.com/2023/08/10/mlir-writing-our-first-pass/]
+# [MLIR — Writing Our First Pass](https://www.jeremykun.com/2023/08/10/mlir-writing-our-first-pass/)
 
 **项目文件结构**
 
@@ -89,799 +89,586 @@ private:
 - `getArgument`: the CLI argument for an `mlir-opt`-like tool.传入命令行参数
 - `getDescription`: the CLI description when running `--help` on the `mlir-opt`-like tool.
 
+```cpp
+// tools/tutorial-opt.cpp
+#include "lib/Transform/Affine/AffineFullUnroll.h"//自定义完全展开仿射循环
+#include "mlir/include/mlir/InitAllDialects.h"//提供了注册所有 MLIR 方言（dialects）的功能
+#include "mlir/include/mlir/Pass/PassManager.h"
+//提供了传递管理器（pass manager）的定义。传递管理器用于管理和执行一系列的传递。
+#include "mlir/include/mlir/Pass/PassRegistry.h"
+//提供了传递注册表（pass registry）的定义。传递注册表用于注册和查找传递
+#include "mlir/include/mlir/Tools/mlir-opt/MlirOptMain.h"
+//提供了 MlirOptMain 函数的定义。MlirOptMain 是一个主函数，用于处理命令行参数并运行 MLIR 优化工具。
 
+int main(int argc, char **argv) {
+  mlir::DialectRegistry registry;
+//创建一个 mlir::DialectRegistry 对象 registry。DialectRegistry 用于注册和管理 MLIR 方言
+  mlir::registerAllDialects(registry);
+//调用 mlir::registerAllDialects 函数，将所有已知的 MLIR 方言注册到 registry 中
+  mlir::PassRegistration<mlir::tutorial::AffineFullUnrollPass>();
+//注册自定义的传递 mlir::tutorial::AffineFullUnrollPass。PassRegistration 模板类用于自动注册传递，使得传递可以在传递管理器中被找到和使用
 
-
-
-
-
-
-
-
-
-
-
-# Chapter 2: Emitting Basic MLIR
-
-
-
-[Introduction: Multi-Level Intermediate Representation](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#introduction-multi-level-intermediate-representation)[Interfacing with MLIR](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#interfacing-with-mlir)[Opaque API](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#opaque-api)[Defining a Toy Dialect](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#defining-a-toy-dialect)[Defining Toy Operations](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#defining-toy-operations)[Op vs Operation: Using MLIR Operations](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#op-vs-operation-using-mlir-operations)[Using the Operation Definition Specification (ODS) Framework](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#using-the-operation-definition-specification-ods-framework)[Complete Toy Example](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#complete-toy-example)
-
-Now that we’re familiar with our language and the AST, let’s see how MLIR can help to compile Toy.
-
-## Introduction: Multi-Level Intermediate Representation [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#introduction-multi-level-intermediate-representation)
-
-Other compilers, like LLVM (see the [Kaleidoscope tutorial](https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/index.html)), offer a fixed set of predefined types and (usually *low-level* / RISC-like) instructions. It is up to the frontend for a given language to perform any language-specific type-checking, analysis, or transformation before emitting LLVM IR. For example, Clang will use its AST to perform not only static analysis but also transformations, such as C++ template instantiation through AST cloning and rewrite. Finally, languages with construction at a higher-level than C/C++ may require non-trivial lowering from their AST to generate LLVM IR.
-
-As a consequence, multiple frontends end up reimplementing significant pieces of infrastructure to support the need for these analyses and transformation. MLIR addresses this issue by being designed for extensibility. As such, there are few pre-defined instructions (*operations* in MLIR terminology) or types.
-
-## Interfacing with MLIR [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#interfacing-with-mlir)
-
-[Language Reference](https://mlir.llvm.org/docs/LangRef/)
-
-MLIR is designed to be a completely extensible infrastructure; there is no closed set of attributes (think: constant metadata), operations, or types. MLIR supports this extensibility with the concept of [Dialects](https://mlir.llvm.org/docs/LangRef/#dialects). Dialects provide a grouping mechanism for abstraction under a unique `namespace`.
-
-**mlir使用dialect进行拓展**
-
-In MLIR, [`Operations`](https://mlir.llvm.org/docs/LangRef/#operations) are the core unit of abstraction and computation, similar in many ways to LLVM instructions. Operations can have application-specific semantics and can be used to represent all of the core IR structures in LLVM: instructions, globals (like functions), modules, etc.
-
-Here is the MLIR assembly(**MLIR汇编**) for the Toy `transpose` operations:
-
-```c++
-%t_tensor = "toy.transpose"(%tensor) {inplace = true} : (tensor<2x3xf64>) -> tensor<3x2xf64> loc("example/file/path":12:1)
-```
-
-Let’s break down the anatomy of this MLIR operation:
-
-- `%t_tensor` **返回结果的名称**
-  - The name given to the result defined by this operation (which includes [a prefixed sigil to avoid collisions](https://mlir.llvm.org/docs/LangRef/#identifiers-and-keywords)). An operation may define zero or more results (in the context of Toy, we will limit ourselves to single-result operations), which are SSA values. The name is used during parsing but is not persistent (e.g., it is not tracked in the in-memory representation of the SSA value).
-- `"toy.transpose"` **操作名称，transpose是在toy这个方言的namespace中**
-  - The name of the operation. It is expected to be a unique string, with the namespace of the dialect **prefixed** before the “`.`”. This can be read as the `transpose` operation in the `toy` dialect.
-- `(%tensor)` **形参，参数列表**
-  - A list of zero or more input operands (or arguments), which are SSA values defined by other operations or referring to block arguments.
-- `{ inplace = true }` **定义了一个常量**
-  - A dictionary of zero or more attributes, which are special operands that are always constant. Here we define a boolean attribute named ‘inplace’ that has a constant value of true.
-- `(tensor<2x3xf64>) -> tensor<3x2xf64>` **输入、输出类型**
-  - This refers to the type of the operation in a functional form, spelling the types of the arguments in parentheses and the type of the return values afterward.
-- `loc("example/file/path":12:1)`
-  - This is the location in the source code from which this operation originated.
-
-Shown here is the general form of an operation. As described above, the set of operations in MLIR is extensible. Operations are modeled using a small set of concepts, enabling operations to be reasoned about and manipulated generically. These concepts are:
-
-- A name for the operation.
-- A list of SSA operand values.
-- A list of [attributes](https://mlir.llvm.org/docs/LangRef/#attributes).
-- A list of [types](https://mlir.llvm.org/docs/LangRef/#type-system) for result values.
-- A [source location](https://mlir.llvm.org/docs/Diagnostics/#source-locations) for debugging purposes.
-- A list of successors [blocks](https://mlir.llvm.org/docs/LangRef/#blocks) (for branches, mostly).
-- A list of [regions](https://mlir.llvm.org/docs/LangRef/#regions) (for structural operations like functions).
-
-In MLIR, every operation has a mandatory source location associated with it. Contrary to LLVM, where debug info locations are metadata and can be dropped, in MLIR, the location is a core requirement, and APIs depend on and manipulate it. Dropping a location is thus an explicit choice which cannot happen by mistake.
-
-To provide an illustration: If a transformation replaces an operation by another, that new operation must still have a location attached. This makes it possible to track where that operation came from.
-
-It’s worth noting that the mlir-opt tool - a tool for testing compiler passes - does not include locations in the output by default. The `-mlir-print-debuginfo` flag specifies to include locations. (Run `mlir-opt --help` for more options.)
-
-### Opaque API [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#opaque-api)
-
-MLIR is designed to allow all IR elements, such as attributes, operations, and types, to be customized(**可以自定义属性、操作符、类型**). At the same time, IR elements can always be reduced to the above fundamental concepts. This allows MLIR to parse, represent, and [round-trip](https://mlir.llvm.org/getting_started/Glossary/#round-trip) IR for *any* operation. For example, we could place our Toy operation from above into an `.mlir` file and round-trip through *mlir-opt* without registering any `toy` related dialect:
-
-```mlir
-func.func @toy_func(%tensor: tensor<2x3xf64>) -> tensor<3x2xf64> {
-  %t_tensor = "toy.transpose"(%tensor) { inplace = true } : (tensor<2x3xf64>) -> tensor<3x2xf64>
-  return %t_tensor : tensor<3x2xf64>
+  return mlir::asMainReturnCode(
+      mlir::MlirOptMain(argc, argv, "Tutorial Pass Driver", registry));
+ //调用 mlir::MlirOptMain 函数，传入命令行参数、程序名称和方言注册表 registry。MlirOptMain 函数会解析命令行参数，加载 MLIR 模块，并应用指定的传递。
+//mlir::asMainReturnCode 函数将 MlirOptMain 的返回值转换为适当的退出码，以便 main 函数返回给操作系统
 }
 ```
 
-In the cases of unregistered attributes, operations, and types, MLIR will enforce some structural constraints (e.g. dominance, etc.), but otherwise they are completely opaque. For instance, MLIR has little information about whether an unregistered operation can operate on particular data types, how many operands it can take, or how many results it produces. This flexibility can be useful for bootstrapping purposes, but it is generally advised against in mature systems. Unregistered operations must be treated conservatively by transformations and analyses, and they are much harder to construct and manipulate.
 
-This handling can be observed by crafting what should be an invalid IR for Toy and seeing it round-trip without tripping the verifier:
 
-```mlir
-func.func @main() {
-  %0 = "toy.print"() : () -> tensor<2x3xf64>
-}
-```
+定义`AffineFullUnrollPass`的`runOnOperation`方法，上面说了`runOnOperation`是一个`pass`的运行逻辑(logic):
 
-There are multiple problems here: the `toy.print` operation is not a terminator; it should take an operand; and it shouldn’t return any values. In the next section, we will register our dialect and operations with MLIR, plug into the verifier, and add nicer APIs to manipulate our operations.
-
-## Defining a Toy Dialect [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#defining-a-toy-dialect)
-
-To effectively interface with MLIR, we will define a new **Toy dialect**. (**定义一个新的toy方言**)This dialect will model the structure of the Toy language, as well as provide an easy avenue for high-level analysis and transformation.
-
-```c++
-/// This is the definition of the Toy dialect. A dialect inherits（继承） from
-/// mlir::Dialect and registers custom attributes, operations, and types. It can
-/// also override virtual methods to change some general behavior, which will be
-/// demonstrated in later chapters of the tutorial.
-class ToyDialect : public mlir::Dialect {
-public:
-  explicit ToyDialect(mlir::MLIRContext *ctx);
-
-  /// Provide a utility accessor to the dialect namespace.
-  static llvm::StringRef getDialectNamespace() { return "toy"; }//返回方言的名字
-
-  /// An initializer called from the constructor of ToyDialect that is used to
-  /// register attributes, operations, types, and more within the Toy dialect.
-  void initialize();//初始化
-};
-```
-
-This is the C++ definition of a dialect, but MLIR also supports defining dialects declaratively via [tablegen](https://llvm.org/docs/TableGen/ProgRef.html). Using the declarative specification is much cleaner as it removes the need for a large portion of the boilerplate when defining a new dialect. It also enables easy generation of dialect documentation, which can be described directly alongside the dialect. In this declarative format, the toy dialect would be specified as:
-
-```
-// Provide a definition of the 'toy' dialect in the ODS framework so that we
-// can define our operations.
-def Toy_Dialect : Dialect {//声明一个继承自Dialect的新方言Toy_Dialect
-  // The namespace of our dialect, this corresponds 1-1 with the string we
-  // provided in `ToyDialect::getDialectNamespace`.
-  let name = "toy";
-
-  // A short one-line summary of our dialect.
-  let summary = "A high-level dialect for analyzing and optimizing the "
-                "Toy language";
-
-  // A much longer description of our dialect.
-  let description = [{
-    The Toy language is a tensor-based language that allows you to define
-    functions, perform some math computation, and print results. This dialect
-    provides a representation of the language that is amenable to analysis and
-    optimization.
-  }];
-
-  // The C++ namespace that the dialect class definition resides in.
-  let cppNamespace = "toy";
-}
-```
-
-To see what this generates, we can run the `mlir-tblgen` command with the `gen-dialect-decls` action like so:**通过以下命令就可以将Ops.td中tablegen格式定义的toy_dialect方言转换成c++格式方言**
-
-```shell
-${build_root}/bin/mlir-tblgen -gen-dialect-decls ${mlir_src_root}/examples/toy/Ch2/include/toy/Ops.td -I ${mlir_src_root}/include/
-```
-
-After the dialect has been defined, it can now be loaded into an MLIRContext:
-
-```c++
-  context.loadDialect<ToyDialect>();
-```
-
-By default, an `MLIRContext` only loads the [Builtin Dialect](https://mlir.llvm.org/docs/Dialects/Builtin/), which provides a few core IR components, meaning that other dialects, such as our `Toy` dialect, must be explicitly loaded.
-
-## Defining Toy Operations [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#defining-toy-operations)
-
-**定义toy方言的操作符**
-
-Now that we have a `Toy` dialect, we can start defining the operations. This will allow for providing semantic information that the rest of the system can hook into. As an example, let’s walk through the creation of a `toy.constant` operation. This operation will represent a constant value in the Toy language.
-
-**toy.constant操作符，定义一个常量**
-
-```mlir
- %4 = "toy.constant"() {value = dense<1.0> : tensor<2x3xf64>} : () -> tensor<2x3xf64>
-```
-
-This operation takes zero operands(==不接受操作数==), a [dense elements](https://mlir.llvm.org/docs/Dialects/Builtin/#denseintorfpelementsattr) attribute named `value` to represent the constant value, and returns a single result of [RankedTensorType](https://mlir.llvm.org/docs/Dialects/Builtin/#rankedtensortype). An operation class inherits from the [CRTP](https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern) `mlir::Op` class which also takes some optional [*traits*](https://mlir.llvm.org/docs/Traits/) to customize its behavior. `Traits` are a mechanism with which we can inject additional behavior into an Operation, such as additional accessors, verification, and more. Let’s look below at a possible definition for the constant operation that we have described above:
-
-```c++
-class ConstantOp : public mlir::Op<
-                     /// `mlir::Op` is a CRTP class, meaning that we provide the
-                     /// derived class as a template parameter.
-    				//ConstantOp是从 mlir::Op继承而来的，并将自身 (ConstantOp) 作为模板参数传递给基类 mlir::Op
-					//这使得 mlir::Op 能够使用ConstantOp的特性
-    				ConstantOp,
-                     /// The ConstantOp takes zero input operands.
-                     mlir::OpTrait::ZeroOperands,
-                     /// The ConstantOp returns a single result.
-                     mlir::OpTrait::OneResult,
-                     /// We also provide a utility `getType` accessor that
-                     /// returns the TensorType of the single result.
-                     mlir::OpTraits::OneTypedResult<TensorType>::Impl> {
-
- public:
-  /// Inherit the constructors from the base Op class.
-  using Op::Op;
-
-  /// Provide the unique name for this operation. MLIR will use this to register
-  /// the operation and uniquely identify it throughout the system. The name
-  /// provided here must be prefixed by the parent dialect namespace followed
-  /// by a `.`.
-  static llvm::StringRef getOperationName() { return "toy.constant"; }
-
-  /// Return the value of the constant by fetching it from the attribute.
-  mlir::DenseElementsAttr getValue();//返回常量值
-
-  /// Operations may provide additional verification beyond what the attached
-  /// traits provide.  Here we will ensure that the specific invariants of the
-  /// constant operation are upheld, for example the result type must be
-  /// of TensorType and matches the type of the constant `value`.
-  LogicalResult verifyInvariants();//验证
-
-  /// Provide an interface to build this operation from a set of input values.
-  /// This interface is used by the `builder` classes to allow for easily
-  /// generating instances of this operation:
-  ///   mlir::OpBuilder::create<ConstantOp>(...)
-  /// This method populates the given `state` that MLIR uses to create
-  /// operations. This state is a collection of all of the discrete elements
-  /// that an operation may contain.
-  /// Build a constant with the given return type and `value` attribute.
-  static void build(mlir::OpBuilder &builder, mlir::OperationState &state,
-                    mlir::Type result, mlir::DenseElementsAttr value);
-  /// Build a constant and reuse the type from the given 'value'.
-  static void build(mlir::OpBuilder &builder, mlir::OperationState &state,
-                    mlir::DenseElementsAttr value);
-  /// Build a constant by broadcasting the given 'value'.
-  static void build(mlir::OpBuilder &builder, mlir::OperationState &state,
-                    double value);
-};
-```
-
-and we can register this operation in the `ToyDialect` initializer:(**在ToyDialect类中初始化这个ConstantOp**)
-
-```c++
-void ToyDialect::initialize() {
-  addOperations<ConstantOp>();//注册操作
-}
-```
-
-### Op vs Operation: Using MLIR Operations [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#op-vs-operation-using-mlir-operations)
-
-Now that we have defined an operation, we will want to access and transform it. In MLIR, there are two main classes related to operations: `Operation` and `Op`. The `Operation` class is used to generically model all operations. It is ‘opaque’, in the sense that it does not describe the properties of particular operations or types of operations. Instead, the `Operation` class provides a general API into an operation instance. On the other hand, each specific type of operation is represented by an `Op` derived class. For instance `ConstantOp` represents a operation with zero inputs, and one output, which is always set to the same value. `Op` derived classes act as smart pointer wrapper around a `Operation*`, provide operation-specific accessor methods, and type-safe properties of operations. This means that when we define our Toy operations, we are simply defining a clean, semantically useful interface for building and interfacing with the `Operation` class. This is why our `ConstantOp` defines no class fields; all of the data for this operation is stored in the referenced `Operation`. A side effect of this design is that we always pass around `Op` derived classes “by-value”, instead of by reference or pointer (*passing by value* is a common idiom in MLIR and applies similarly to attributes, types, etc). Given a generic `Operation*` instance, we can always get a specific `Op` instance using LLVM’s casting infrastructure:
-
-```c++
-void processConstantOp(mlir::Operation *operation) {
-  ConstantOp op = llvm::dyn_cast<ConstantOp>(operation);
-
-  // This operation is not an instance of `ConstantOp`.
-  if (!op)
-    return;
-
-  // Get the internal operation instance wrapped by the smart pointer.
-  mlir::Operation *internalOperation = op.getOperation();
-  assert(internalOperation == operation &&
-         "these operation instances are the same");
-}
-```
-
-### Using the Operation Definition Specification (ODS) Framework [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#using-the-operation-definition-specification-ods-framework)
-
-In addition to specializing the `mlir::Op` C++ template, MLIR also supports defining operations in a declarative manner. This is achieved via the [Operation Definition Specification](https://mlir.llvm.org/docs/DefiningDialects/Operations/) framework. Facts regarding an operation are specified concisely into a TableGen record, which will be expanded into an equivalent `mlir::Op` C++ template specialization at compile time. Using the ODS framework is the desired way for defining operations in MLIR given the simplicity, conciseness, and general stability in the face of C++ API changes.
-
-Lets see how to define the ODS equivalent of our ConstantOp:
-
-Operations in ODS are defined by inheriting from the `Op` class. To simplify our operation definitions, we will define a base class for operations in the Toy dialect.
-
-```tablegen
-// Base class for toy dialect operations. This operation inherits from the base
-// `Op` class in OpBase.td, and provides:
-//   * The parent dialect of the operation.
-//   * The mnemonic for the operation, or the name without the dialect prefix.
-//   * A list of traits for the operation.
-class Toy_Op<string mnemonic, list<Trait> traits = []> :
-    Op<Toy_Dialect, mnemonic, traits>;
-```
-
-With all of the preliminary pieces defined, we can begin to define the constant operation.
-
-We define a toy operation by inheriting from our base ‘Toy_Op’ class above. Here we provide the mnemonic and a list of traits for the operation. The [mnemonic](https://mlir.llvm.org/docs/DefiningDialects/Operations/#operation-name) here matches the one given in `ConstantOp::getOperationName` without the dialect prefix; `toy.`. Missing here from our C++ definition are the `ZeroOperands` and `OneResult` traits; these will be automatically inferred based upon the `arguments` and `results` fields we define later.
-
-```tablegen
-def ConstantOp : Toy_Op<"constant"> {
-}
-```
-
-At this point you probably might want to know what the C++ code generated by TableGen looks like. Simply run the `mlir-tblgen` command with the `gen-op-decls` or the `gen-op-defs` action like so:
-
-```shell
-${build_root}/bin/mlir-tblgen -gen-op-defs ${mlir_src_root}/examples/toy/Ch2/include/toy/Ops.td -I ${mlir_src_root}/include/
-```
-
-Depending on the selected action, this will print either the `ConstantOp` class declaration or its implementation. Comparing this output to the hand-crafted implementation is incredibly useful when getting started with TableGen.
-
-#### Defining Arguments and Results [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#defining-arguments-and-results)
-
-With the shell of the operation defined, we can now provide the [inputs](https://mlir.llvm.org/docs/DefiningDialects/Operations/#operation-arguments) and [outputs](https://mlir.llvm.org/docs/DefiningDialects/Operations/#operation-results) to our operation. The inputs, or arguments(**输入参数**), to an operation may be attributes or types for SSA operand values. The results correspond to a set of types for the values produced by the operation:
-
-```tablegen
-def ConstantOp : Toy_Op<"constant"> {//ConstantOp继承自Toy_Op，并且助记符mnemonic = "constant"
-  // The constant operation takes an attribute as the only input.
-  // `F64ElementsAttr` corresponds to a 64-bit floating-point ElementsAttr.
-  let arguments = (ins F64ElementsAttr:$value);
-
-  // The constant operation returns a single value of TensorType.
-  // F64Tensor corresponds to a 64-bit floating-point TensorType.
-  let results = (outs F64Tensor);
-}
-```
-
-By providing a name to the arguments or results, e.g. `$value`, ODS will automatically generate a matching accessor: `DenseElementsAttr ConstantOp::value()`.
-
-#### Adding Documentation [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#adding-documentation)写文档
-
-The next step after defining the operation is to document it. Operations may provide [`summary` and `description`](https://mlir.llvm.org/docs/DefiningDialects/Operations/#operation-documentation) fields to describe the semantics of the operation. This information is useful for users of the dialect and can even be used to auto-generate Markdown documents.
-
-```tablegen
-def ConstantOp : Toy_Op<"constant"> {
-  // Provide a summary and description for this operation. This can be used to
-  // auto-generate documentation of the operations within our dialect.
-  let summary = "constant operation";
-  let description = [{
-    Constant operation turns a literal into an SSA value. The data is attached
-    to the operation as an attribute. For example:
-
-      %0 = "toy.constant"()
-         { value = dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf64> }
-        : () -> tensor<2x3xf64>
-  }];
-
-  // The constant operation takes an attribute as the only input.
-  // `F64ElementsAttr` corresponds to a 64-bit floating-point ElementsAttr.
-  let arguments = (ins F64ElementsAttr:$value);
-
-  // The generic call operation returns a single value of TensorType.
-  // F64Tensor corresponds to a 64-bit floating-point TensorType.
-  let results = (outs F64Tensor);
-}
-```
-
-#### Verifying Operation Semantics [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#verifying-operation-semantics) 检查操作语义
-
-At this point we’ve already covered a majority of the original C++ operation definition. The next piece to define is the verifier. Luckily, much like the named accessor, the ODS framework will **automatically** generate a lot of the necessary verification logic based upon the constraints we have given. This means that we don’t need to verify the structure of the return type, or even the input attribute `value`. In many cases, additional verification is not even necessary for ODS operations（**一般不需要进行验证**）. To add additional verification logic, an operation can override the [`verifier`](https://mlir.llvm.org/docs/DefiningDialects/Operations/#custom-verifier-code) field（**如果要添加额外的验证，需要重载verifier这个类方法**）. The `verifier` field allows for defining a C++ code blob that will be run as part of `ConstantOp::verify`. This blob can assume that all of the other invariants of the operation have already been verified:
-
-```tablegen
-def ConstantOp : Toy_Op<"constant"> {
-  // Provide a summary and description for this operation. This can be used to
-  // auto-generate documentation of the operations within our dialect.
-  let summary = "constant operation";
-  let description = [{
-    Constant operation turns a literal into an SSA value. The data is attached
-    to the operation as an attribute. For example:
-
-      %0 = "toy.constant"()
-         { value = dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf64> }
-        : () -> tensor<2x3xf64>
-  }];
-
-  // The constant operation takes an attribute as the only input.
-  // `F64ElementsAttr` corresponds to a 64-bit floating-point ElementsAttr.
-  let arguments = (ins F64ElementsAttr:$value);
-
-  // The generic call operation returns a single value of TensorType.
-  // F64Tensor corresponds to a 64-bit floating-point TensorType.
-  let results = (outs F64Tensor);
-
-  // Add additional verification logic to the constant operation. Setting this bit
-  // to `1` will generate a `::llvm::LogicalResult verify()` declaration on the
-  // operation class that is called after ODS constructs have been verified, for
-  // example the types of arguments and results. We implement additional verification
-  // in the definition of this `verify` method in the C++ source file.
-  let hasVerifier = 1;
-}
-```
-
-#### Attaching `build` Methods [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#attaching-build-methods)
-
-The final missing component here from our original C++ example are the `build` methods. ODS can generate some simple build methods automatically, and in this case it will generate our first build method for us. For the rest, we define the [`builders`](https://mlir.llvm.org/docs/DefiningDialects/Operations/#custom-builder-methods) field. This field takes a list of `OpBuilder` objects that take a string corresponding to a list of C++ parameters, as well as an optional code block that can be used to specify the implementation inline.
-
-```tablegen
-def ConstantOp : Toy_Op<"constant"> {
-  ...
-
-  // Add custom build methods for the constant operation. These methods populate
-  // the `state` that MLIR uses to create operations, i.e. these are used when
-  // using `builder.create<ConstantOp>(...)`.
-  let builders = [
-    // Build a constant with a given constant tensor value.
-    OpBuilder<(ins "DenseElementsAttr":$value), [{
-      // Call into an autogenerated `build` method.
-      build(builder, result, value.getType(), value);//result保留结果状态
-    }]>,
-
-    // Build a constant with a given constant floating-point value. This builder
-    // creates a declaration for `ConstantOp::build` with the given parameters.
-    OpBuilder<(ins "double":$value)>
-  ];
-}
-```
-
-#### Specifying a Custom Assembly Format [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#specifying-a-custom-assembly-format)
-
-At this point we can generate our “Toy IR”. For example, the following:
-
-```toy
-# User defined generic function that operates on unknown shaped arguments.
-def multiply_transpose(a, b) {
-  return transpose(a) * transpose(b);
-}
-
-def main() {
-  var a<2, 3> = [[1, 2, 3], [4, 5, 6]];
-  var b<2, 3> = [1, 2, 3, 4, 5, 6];
-  var c = multiply_transpose(a, b);
-  var d = multiply_transpose(b, a);
-  print(d);
-}
-```
-
-Results in the following IR:
-
-```mlir
-module {
-  "toy.func"() ({
-  ^bb0(%arg0: tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":4:1), %arg1: tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":4:1)):
-    %0 = "toy.transpose"(%arg0) : (tensor<*xf64>) -> tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":5:10)
-    %1 = "toy.transpose"(%arg1) : (tensor<*xf64>) -> tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":5:25)
-    %2 = "toy.mul"(%0, %1) : (tensor<*xf64>, tensor<*xf64>) -> tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":5:25)
-    "toy.return"(%2) : (tensor<*xf64>) -> () loc("test/Examples/Toy/Ch2/codegen.toy":5:3)
-  }) {sym_name = "multiply_transpose", type = (tensor<*xf64>, tensor<*xf64>) -> tensor<*xf64>} : () -> () loc("test/Examples/Toy/Ch2/codegen.toy":4:1)
-  "toy.func"() ({
-    %0 = "toy.constant"() {value = dense<[[1.000000e+00, 2.000000e+00, 3.000000e+00], [4.000000e+00, 5.000000e+00, 6.000000e+00]]> : tensor<2x3xf64>} : () -> tensor<2x3xf64> loc("test/Examples/Toy/Ch2/codegen.toy":9:17)
-    %1 = "toy.reshape"(%0) : (tensor<2x3xf64>) -> tensor<2x3xf64> loc("test/Examples/Toy/Ch2/codegen.toy":9:3)
-    %2 = "toy.constant"() {value = dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00]> : tensor<6xf64>} : () -> tensor<6xf64> loc("test/Examples/Toy/Ch2/codegen.toy":10:17)
-    %3 = "toy.reshape"(%2) : (tensor<6xf64>) -> tensor<2x3xf64> loc("test/Examples/Toy/Ch2/codegen.toy":10:3)
-    %4 = "toy.generic_call"(%1, %3) {callee = @multiply_transpose} : (tensor<2x3xf64>, tensor<2x3xf64>) -> tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":11:11)
-    %5 = "toy.generic_call"(%3, %1) {callee = @multiply_transpose} : (tensor<2x3xf64>, tensor<2x3xf64>) -> tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":12:11)
-    "toy.print"(%5) : (tensor<*xf64>) -> () loc("test/Examples/Toy/Ch2/codegen.toy":13:3)
-    "toy.return"() : () -> () loc("test/Examples/Toy/Ch2/codegen.toy":8:1)
-  }) {sym_name = "main", type = () -> ()} : () -> () loc("test/Examples/Toy/Ch2/codegen.toy":8:1)
-} loc(unknown)
-```
-
-One thing to notice here is that all of our Toy operations are printed using the generic assembly format. This format is the one shown when breaking down `toy.transpose` at the beginning of this chapter. MLIR allows for operations to define their own custom assembly format, either [declaratively](https://mlir.llvm.org/docs/DefiningDialects/Operations/#declarative-assembly-format) or imperatively via C++. Defining a custom assembly format allows for tailoring the generated IR into something a bit more readable by removing a lot of the fluff that is required by the generic format. Let’s walk through an example of an operation format that we would like to simplify.
-
-这里需要注意的一点是，我们所有的Toy操作都是使用通用汇编格式打印的。这种格式是在本章开头分解toy. transose时显示的格式。MLIR允许操作定义自己的自定义汇编格式，可以是声明式的，也可以是通过C++强制的。定义自定义汇编格式允许通过删除通用格式所需的大量绒毛来定制生成的IR，使其更具可读性。让我们通过一个我们想要简化的操作格式示例。
-
-##### `toy.print` [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#toyprint)
-
-The current form of `toy.print` is a little verbose. There are a lot of additional characters that we would like to strip away. Let’s begin by thinking of what a good format of `toy.print` would be, and see how we can implement it. Looking at the basics of `toy.print` we get:
-
-```mlir
-toy.print %5 : tensor<*xf64> loc(...)
-```
-
-Here we have stripped much of the format down to the bare essentials, and it has become much more readable. To provide a custom assembly format, an operation can either override the `hasCustomAssemblyFormat` field for a C++ format, or the `assemblyFormat` field for the declarative format. Let’s look at the C++ variant first, as this is what the declarative format maps to internally.
-
-```tablegen
-/// Consider a stripped definition of `toy.print` here.
-def PrintOp : Toy_Op<"print"> {
-  let arguments = (ins F64Tensor:$input);
-
-  // Divert the printer and parser to `parse` and `print` methods on our operation,
-  // to be implemented in the .cpp file. More details on these methods is shown below.
-  let hasCustomAssemblyFormat = 1;
-}
-```
-
-A C++ implementation for the printer and parser is shown below:
-
-```c++
-/// The 'OpAsmPrinter' class is a stream that will allows for formatting
-/// strings, attributes, operands, types, etc.
-void PrintOp::print(mlir::OpAsmPrinter &printer) {
-  printer << "toy.print " << op.input();
-  printer.printOptionalAttrDict(op.getAttrs());
-  printer << " : " << op.input().getType();
-}
-
-/// The 'OpAsmParser' class provides a collection of methods for parsing
-/// various punctuation, as well as attributes, operands, types, etc. Each of
-/// these methods returns a `ParseResult`. This class is a wrapper around
-/// `LogicalResult` that can be converted to a boolean `true` value on failure,
-/// or `false` on success. This allows for easily chaining together a set of
-/// parser rules. These rules are used to populate an `mlir::OperationState`
-/// similarly to the `build` methods described above.
-mlir::ParseResult PrintOp::parse(mlir::OpAsmParser &parser,
-                                 mlir::OperationState &result) {
-  // Parse the input operand, the attribute dictionary, and the type of the
-  // input.
-  mlir::OpAsmParser::UnresolvedOperand inputOperand;
-  mlir::Type inputType;
-  if (parser.parseOperand(inputOperand) ||
-      parser.parseOptionalAttrDict(result.attributes) || parser.parseColon() ||
-      parser.parseType(inputType))
-    return mlir::failure();
-
-  // Resolve the input operand to the type we parsed in.
-  if (parser.resolveOperand(inputOperand, inputType, result.operands))
-    return mlir::failure();
-
-  return mlir::success();
-}
-```
-
-With the C++ implementation defined, let’s see how this can be mapped to the [declarative format](https://mlir.llvm.org/docs/DefiningDialects/Operations/#declarative-assembly-format). The declarative format is largely composed of three different components:
-
-- Directives
-  - A type of builtin function, with an optional set of arguments.
-- Literals
-  - A keyword or punctuation surrounded by ``.
-- Variables
-  - An entity that has been registered on the operation itself, i.e. an argument(attribute or operand), result, successor, etc. In the `PrintOp` example above, a variable would be `$input`.
-
-A direct mapping of our C++ format looks something like:
-
-```tablegen
-/// Consider a stripped definition of `toy.print` here.
-def PrintOp : Toy_Op<"print"> {
-  let arguments = (ins F64Tensor:$input);
-
-  // In the following format we have two directives, `attr-dict` and `type`.
-  // These correspond to the attribute dictionary and the type of a given
-  // variable represectively.
-  let assemblyFormat = "$input attr-dict `:` type($input)";
-}
-```
-
-The [declarative format](https://mlir.llvm.org/docs/DefiningDialects/Operations/#declarative-assembly-format) has many more interesting features, so be sure to check it out before implementing a custom format in C++. After beautifying the format of a few of our operations we now get a much more readable:
-
-```mlir
-module {
-  toy.func @multiply_transpose(%arg0: tensor<*xf64>, %arg1: tensor<*xf64>) -> tensor<*xf64> {
-    %0 = toy.transpose(%arg0 : tensor<*xf64>) to tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":5:10)
-    %1 = toy.transpose(%arg1 : tensor<*xf64>) to tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":5:25)
-    %2 = toy.mul %0, %1 : tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":5:25)
-    toy.return %2 : tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":5:3)
-  } loc("test/Examples/Toy/Ch2/codegen.toy":4:1)
-  toy.func @main() {
-    %0 = toy.constant dense<[[1.000000e+00, 2.000000e+00, 3.000000e+00], [4.000000e+00, 5.000000e+00, 6.000000e+00]]> : tensor<2x3xf64> loc("test/Examples/Toy/Ch2/codegen.toy":9:17)
-    %1 = toy.reshape(%0 : tensor<2x3xf64>) to tensor<2x3xf64> loc("test/Examples/Toy/Ch2/codegen.toy":9:3)
-    %2 = toy.constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00]> : tensor<6xf64> loc("test/Examples/Toy/Ch2/codegen.toy":10:17)
-    %3 = toy.reshape(%2 : tensor<6xf64>) to tensor<2x3xf64> loc("test/Examples/Toy/Ch2/codegen.toy":10:3)
-    %4 = toy.generic_call @multiply_transpose(%1, %3) : (tensor<2x3xf64>, tensor<2x3xf64>) -> tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":11:11)
-    %5 = toy.generic_call @multiply_transpose(%3, %1) : (tensor<2x3xf64>, tensor<2x3xf64>) -> tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":12:11)
-    toy.print %5 : tensor<*xf64> loc("test/Examples/Toy/Ch2/codegen.toy":13:3)
-    toy.return loc("test/Examples/Toy/Ch2/codegen.toy":8:1)
-  } loc("test/Examples/Toy/Ch2/codegen.toy":8:1)
-} loc(unknown)
-```
-
-Above we introduce several of the concepts for defining operations in the ODS framework, but there are many more that we haven’t had a chance to: regions, variadic operands, etc. Check out the [full specification](https://mlir.llvm.org/docs/DefiningDialects/Operations/) for more details.
-
-## Complete Toy Example [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/#complete-toy-example)
-
-We can now generate our “Toy IR”. You can build `toyc-ch2` and try yourself on the above example: `toyc-ch2 test/Examples/Toy/Ch2/codegen.toy -emit=mlir -mlir-print-debuginfo`. We can also check our RoundTrip: `toyc-ch2 test/Examples/Toy/Ch2/codegen.toy -emit=mlir -mlir-print-debuginfo 2> codegen.mlir` followed by `toyc-ch2 codegen.mlir -emit=mlir`. You should also use `mlir-tblgen` on the final definition file and study the generated C++ code.
-
-At this point, MLIR knows about our Toy dialect and operations. In the [next chapter](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-3/), we will leverage our new dialect to implement some high-level language-specific analyses and transformations for the Toy language.
-
-# Chapter 3: High-level Language-Specific Analysis and Transformation
-
-
-
-[Optimize Transpose using C++ style pattern-match and rewrite](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-3/#optimize-transpose-using-c-style-pattern-match-and-rewrite)[Optimize Reshapes using DRR](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-3/#optimize-reshapes-using-drr)
-
-Creating a dialect that closely represents the semantics of an input language enables analyses, transformations and optimizations in MLIR that require high-level language information and are generally performed on the language AST. For example, `clang` has a fairly [heavy mechanism](https://clang.llvm.org/doxygen/classclang_1_1TreeTransform.html) for performing template instantiation in C++.
-
-We divide compiler transformations into two categories: local and global. In this chapter, we focus on how to leverage the Toy Dialect and its high-level semantics to perform local pattern-match transformations that would be difficult in LLVM. For this, we use MLIR’s [Generic DAG Rewriter](https://mlir.llvm.org/docs/PatternRewriter/).
-
-There are two methods that can be used to implement pattern-match transformations: 1. Imperative, C++ pattern-match and rewrite 2. Declarative, rule-based pattern-match and rewrite using table-driven [Declarative Rewrite Rules](https://mlir.llvm.org/docs/DeclarativeRewrites/) (DRR). Note that the use of DRR requires that the operations be defined using ODS, as described in [Chapter 2](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-2/).
-
-## Optimize Transpose using C++ style pattern-match and rewrite [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-3/#optimize-transpose-using-c-style-pattern-match-and-rewrite)
-
-Let’s start with a simple pattern and try to eliminate a sequence of two transposes that cancel out: `transpose(transpose(X)) -> X`. Here is the corresponding Toy example:
-
-```toy
-def transpose_transpose(x) {
-  return transpose(transpose(x));
-}
-```
-
-Which corresponds to the following IR:
-
-```mlir
-toy.func @transpose_transpose(%arg0: tensor<*xf64>) -> tensor<*xf64> {
-  %0 = toy.transpose(%arg0 : tensor<*xf64>) to tensor<*xf64>
-  %1 = toy.transpose(%0 : tensor<*xf64>) to tensor<*xf64>
-  toy.return %1 : tensor<*xf64>
-}
-```
-
-This is a good example of a transformation that is trivial to match on the Toy IR but that would be quite hard for LLVM to figure. For example, today Clang can’t optimize away the temporary array, and the computation with the naive transpose is expressed with these loops:
-
-```c++
-#define N 100
-#define M 100
-
-void sink(void *);
-void double_transpose(int A[N][M]) {
-  int B[M][N];
-  for(int i = 0; i < N; ++i) {
-    for(int j = 0; j < M; ++j) {
-       B[j][i] = A[i][j];
+```cpp
+void AffineFullUnrollPass::runOnOperation() {
+  getOperation().walk([&](AffineForOp op) {
+    if (failed(loopUnrollFull(op))) {
+      op.emitError("unrolling failed");
+      signalPassFailure();
     }
-  }
-  for(int i = 0; i < N; ++i) {
-    for(int j = 0; j < M; ++j) {
-       A[i][j] = B[j][i];
-    }
-  }
-  sink(A);
+  });
 }
 ```
 
-For a simple C++ approach to rewrite, involving matching a tree-like pattern in the IR and replacing it with a different set of operations, we can plug into the MLIR `Canonicalizer` pass by implementing a `RewritePattern`:
+<del>模式重写引擎(`pattern rewrite engine`)代码看不懂先放着</del>
 
-```c++
-/// Fold transpose(transpose(x)) -> x
-struct SimplifyRedundantTranspose : public mlir::OpRewritePattern<TransposeOp> {
-  /// We register this pattern to match every toy.transpose in the IR.
-  /// The "benefit" is used by the framework to order the patterns and process
-  /// them in order of profitability.
-  SimplifyRedundantTranspose(mlir::MLIRContext *context)
-      : OpRewritePattern<TransposeOp>(context, /*benefit=*/1) {}
+**Pattern Rewrite Engine**
 
-  /// This method is attempting to match a pattern and rewrite it. The rewriter
-  /// argument is the orchestrator of the sequence of rewrites. It is expected
-  /// to interact with it to perform any changes to the IR from here.
-  llvm::LogicalResult
-  matchAndRewrite(TransposeOp op,
-                  mlir::PatternRewriter &rewriter) const override {
-    // Look through the input of the current transpose.
-    mlir::Value transposeInput = op.getOperand();
-    TransposeOp transposeInputOp = transposeInput.getDefiningOp<TransposeOp>();
+上述方法是通过**遍历AST**对`AffineForOp`应用`loopUnrollFull()`来实现循环展开。但MLIR中还可以通过模式重写引擎进行循环展开。
 
-    // Input defined by another transpose? If not, no match.
-    if (!transposeInputOp)
+> 重写模式（rewrite pattern）是OpRewritePattern的一个子类，它有一个名为matchAndRewrite的方法，该方法执行实际的转换操作。这意味着，当模式与IR中的某个结构匹配时，matchAndRewrite方法会被调用，以应用定义的转换。这种方法的好处是它可以自动处理多次应用相同转换的情况，并且开发者不需要编写大量的代码来手动遍历AST。
+
+↑ 不懂为什么相较于遍历AST，模式重写不需要编写大量代码来手动遍历AST。
+
+```cpp
+struct AffineFullUnrollPattern ://定义模式AffineFullUnrollPattern，继承自OpRewritePattern,处理AffineForOp
+  public OpRewritePattern<AffineForOp> {
+  AffineFullUnrollPattern(mlir::MLIRContext *context)
+      : OpRewritePattern<AffineForOp>(context, /*benefit=*/1) {}
+      //benefit表示模式优先级
+
+  LogicalResult matchAndRewrite(AffineForOp op,//匹配与重写:op与rewriter匹配时，调用loopUnrollFull展开循环
+                                PatternRewriter &rewriter) const override {
+    return loopUnrollFull(op);
+  }
+};
+
+// A pass that invokes the pattern rewrite engine.
+void AffineFullUnrollPassAsPatternRewrite::runOnOperation() {//定义runOnOperation
+  mlir::RewritePatternSet patterns(&getContext());
+  patterns.add<AffineFullUnrollPattern>(&getContext());//patterns添加模式AffineFullUnrollPattern
+  // One could use GreedyRewriteConfig here to slightly tweak the behavior of
+  // the pattern application.
+  (void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns));//应用模式
+}
+```
+
+**A proper greedy RewritePattern**
+
+出于乘法比加法更慢且在硬件上更贵，于是设计一个模式重写，将乘法分解成加法，例如将`y = 9 * x`转换成`a = x+x; b = a+a; c = b+b; y = c+x`
+
+* `PowerOfTwoExpand` : rewrites `y=C*x` as `y = C/2*x + C/2*x`
+* `PeelFromMul` : 从不是2的幂的乘积中提取出一个加法，例如`y = 9*x` -> `y = 8*x + x`
+
+
+
+`PowerOfTwoExpand` ：
+
+```cpp
+LogicalResult matchAndRewrite(
+       MulIOp op, PatternRewriter &rewriter) const override {
+    Value lhs = op.getOperand(0);
+
+    // canonicalization patterns ensure the constant is on the right, if there is a constant
+    // See https://mlir.llvm.org/docs/Canonicalization/#globally-applied-rules
+    Value rhs = op.getOperand(1);
+    auto rhsDefiningOp = rhs.getDefiningOp<arith::ConstantIntOp>();
+    //获取 rhs 操作数的定义操作，并检查它是否是一个 arith::ConstantIntOp,如果不是，rhsDefiningOp = nullptr
+   
+    if (!rhsDefiningOp) {//rhs不是一个常数，报错
       return failure();
+    }
 
-    // Otherwise, we have a redundant transpose. Use the rewriter.
-    rewriter.replaceOp(op, {transposeInputOp.getOperand()});
+    int64_t value = rhsDefiningOp.value();//得到rhs的值
+    bool is_power_of_two = (value & (value - 1)) == 0;//判断value是否为2的幂
+
+    if (!is_power_of_two) {
+      return failure();
+    }
+
+    ConstantOp newConstant = rewriter.create<ConstantOp>(
+        rhsDefiningOp.getLoc(), rewriter.getIntegerAttr(rhs.getType(), value / 2));
+    //重写、新建一个常量ConstantOp ; rhsDefiningOp.getLoc()获得位置信息
+    //rewriter.getIntegerAttr(rhs.getType(), value / 2)创建一个整数类型，其类型与rhs一致，值为value / 2
+    
+    MulIOp newMul = rewriter.create<MulIOp>(op.getLoc(), lhs, newConstant);
+    AddIOp newAdd = rewriter.create<AddIOp>(op.getLoc(), newMul, newMul);
+    //新建乘法、加法
+
+    rewriter.replaceOp(op, {newAdd});//newAdd替换op
+    rewriter.eraseOp(rhsDefiningOp);
+
+    return success();
+  }
+```
+
+`PeelFromMul`
+
+```cpp
+LogicalResult matchAndRewrite(MulIOp op,
+                                PatternRewriter &rewriter) const override {
+    Value lhs = op.getOperand(0);
+    Value rhs = op.getOperand(1);
+    auto rhsDefiningOp = rhs.getDefiningOp<arith::ConstantIntOp>();
+    if (!rhsDefiningOp) { return failure(); }
+    int64_t value = rhsDefiningOp.value();
+
+    // We are guaranteed `value` is not a power of two, because the greedy
+    // rewrite engine ensures the PowerOfTwoExpand pattern is run first, since
+    // it has higher benefit.
+
+    ConstantOp newConstant = rewriter.create<ConstantOp>(
+        rhsDefiningOp.getLoc(), rewriter.getIntegerAttr(rhs.getType(), value - 1));
+    MulIOp newMul = rewriter.create<MulIOp>(op.getLoc(), lhs, newConstant);
+    AddIOp newAdd = rewriter.create<AddIOp>(op.getLoc(), newMul, lhs);
+
+    rewriter.replaceOp(op, {newAdd});
+    rewriter.eraseOp(rhsDefiningOp);
+```
+
+
+
+# [MLIR — Using Tablegen for Passes](https://www.jeremykun.com/2023/08/10/mlir-using-tablegen-for-passes/)
+
+好家伙，一上来就跟我说，写`pass`一般不像上一章用C++调Api来实现，而是用`tablegen`。感情我白看了，而且模式重写引擎的代码也不是很好懂。
+
+
+
+```cpp
+def AffineFullUnroll : Pass<"affine-full-unroll"> {
+  let summary = "Fully unroll all affine loops";
+  let description = [{
+    Fully unroll all affine loops. (could add more docs here like code examples)
+  }];
+  let dependentDialects = ["mlir::affine::AffineDialect"];
+}
+```
+
+* `tablegen`以`def`关键字开头。需要注意的是：`def`与`class`在`tablegen`中是不同的。`def`表明接下来的代码是要被`tablegen`生成实际的代码；而`class`定义的是一个非被实例的模板，不会被tablegen生成对应代码，允许在多处实例化与重用。简而言之，def 是用于生成代码的，而 class 是用于定义模板和重用代码的。
+
+* 使用`tablegen`生成的`Passes.h.inc`见[gist link](https://gist.github.com/j2kun/4d21d5bc85f6c9326bef81eaf6c323e7) 生成的C++代码风格都是`#ifdef……#endif`,即用`宏`为参数，`#include`为函数组织起来的(`this pattern of using #include as a function with #define as the argument`)
+* 所以在`AffineFullUnroll.h`和`AffineFullUnrollPatternRewrite.h`中，通过声明宏`GEN_PASS_DECL_AFFINEFULLUNROLL` `GEN_PASS_DECL_AFFINEFULLUNROLLPATTERNREWRITE`来开启这两个`Pass`的定义(定义了这两个宏，`#include Passes.h.inc`中就可以将这两个`Pass`的定义`include`进来。见(见[gist link](https://gist.github.com/j2kun/4d21d5bc85f6c9326bef81eaf6c323e7) Line14，87)。
+
+* 在`Passes.h`中定义`GEN_PASS_REGISTRATION`来开启所有`Pass`(包括以上两个Pass)的注册。见[gist link](https://gist.github.com/j2kun/4d21d5bc85f6c9326bef81eaf6c323e7) Line155，在`Passes.h`中定义了`GEN_PASS_REGISTRATION`,那么`#include Passes.h.inc`中就会创建`registerAffineFullUnroll`、`registerAffineFullUnrollPatternRewrite`.
+
+* 综上，`lib/Transform/Affine`文件夹层次结构就很清楚了：`Passes.td`中定义了 `AffineFullUnroll` `AffineFullUnrollPatternRewrite`这两个`Pass` , 生成的`build/lib/Tranform/Affine/Passes.h.inc`中包含了这两个`Pass`的**定义**和**注册**。`AffineFullUnroll.h`中通过定义宏`GEN_PASS_DECL_AFFINEFULLUNROLL`,在`#include Passes.h.inc`中引入了`AffineFullUnroll`的**定义**和**注册**。`AffineFullUnrollPatternRewrite.h`同理。
+
+  现在`AffineFullUnroll.h`和`AffineFullUnrollPatternRewrite.h`中包含了这两个Pass的定义与注册。   `Pass.h`中`#include`进了这两个文件：
+
+  ```cpp
+  #include "lib/Transform/Affine/AffineFullUnroll.h"
+  #include "lib/Transform/Affine/AffineFullUnrollPatternRewrite.h"
+  ```
+
+  然后定义宏`GEN_PASS_REGISTRATION`,开启了这两个`Pass`的注册。
+
+* 生成的`Passes.h.inc`中定义了前面提到的一个`Pass`所需要定义的`getArgument`、`getDescription()`函数，但缺少函数`RunOnOperation`的定义(即`Pass logic`的定义)
+  * 好吧，上面的说法有些偏差：`Passes.h.inc`中并没有`AffineFullUnroll`的**定义**，而是定义了`AffineFullUnrollBase`。`AffineFullUnroll`的定义在`AffineFullUnroll.cpp`中通过继承`AffineFullUnrollBase`来定义结构体`AffineFullUnroll`   (`AffineFullUnrollPatternRewrite`同理)。`AffineFullUnroll`的定义和`runOnOperation`都在`AffineFullUnroll.cpp`中实现：
+
+```cpp
+struct AffineFullUnroll : impl::AffineFullUnrollBase<AffineFullUnroll> {
+  using AffineFullUnrollBase::AffineFullUnrollBase;//使用AffineFullUnrollBase的构造函数
+
+  void runOnOperation() {
+    getOperation()->walk([&](AffineForOp op) {
+      if (failed(loopUnrollFull(op))) {
+        op.emitError("unrolling failed");
+        signalPassFailure();
+      }
+    });
+  }
+};
+```
+
+# [MLIR — Defining a New Dialect](https://www.jeremykun.com/2023/08/21/mlir-defining-a-new-dialect/)
+
+`dialect`使用`tablegen`定义：`PolyDialect.td`:
+
+```tablegen
+include "mlir/IR/DialectBase.td"
+
+def Poly_Dialect : Dialect {
+  let name = "poly";
+  let summary = "A dialect for polynomial math";
+  let description = [{
+    The poly dialect defines types and operations for single-variable
+    polynomials over integers.
+  }];
+
+let cppNamespace = "::mlir::tutorial::poly";
+}
+```
+
+`dialect`定义的方式与`pass`差不多，但基于`PolyOps.td`文件生成了多个目标文件，见`cmakelist`：
+
+```cmake
+set(LLVM_TARGET_DEFINITIONS PolyOps.td)
+mlir_tablegen(PolyOps.h.inc -gen-op-decls)
+mlir_tablegen(PolyOps.cpp.inc -gen-op-defs)
+mlir_tablegen(PolyTypes.h.inc -gen-typedef-decls -typedefs-dialect=poly)
+mlir_tablegen(PolyTypes.cpp.inc -gen-typedef-defs -typedefs-dialect=poly)
+mlir_tablegen(PolyDialect.h.inc -gen-dialect-decls -dialect=poly)
+mlir_tablegen(PolyDialect.cpp.inc -gen-dialect-defs -dialect=poly)
+```
+
+此外，`dialect`也需要在`tutorial-opt.cpp`中额外注册：
+
+```cpp
+mlir::DialectRegistry registry;
+registry.insert<mlir::tutorial::poly::PolyDialect>();
+mlir::registerAllDialects(registry);
+```
+
+**一种方言的文件组织形式(以poly方言为例)**:
+
+* `PolyTypes.h`只包含`PolyTypes.h.inc`
+* 在 `PolyDialect.cpp` 中包含 `PolyTypes.cpp.inc`
+* **添加 PolyTypes.cpp**：如果需要，应该添加一个 PolyTypes.cpp 文件，这个文件包含了一些额外的实现，这些实现是 tablegen（一个代码生成工具）声明的，但是不能自动生成的函数。(项目文件中并没有该文件，但在`PolyOps.cpp`中实现了一些不能自动生成的逻辑。)
+
+* 总之，每一个`.h`文件对应一个`.h.inc`，每一个`.cpp`对应`.cpp.inc`，并且在`PolyDialect.cpp`中将它们连接起来。
+
+
+
+以上定义的`poly`方言是空的，接下来为它加一些内容：
+
+**添加一个poly type**
+
+```tablegen
+// PolyTypes.td
+#ifndef LIB_DIALECT_POLY_POLYTYPES_TD_
+#define LIB_DIALECT_POLY_POLYTYPES_TD_
+
+include "PolyDialect.td"
+include "mlir/IR/AttrTypeBase.td"
+
+// A base class for all types in this dialect
+class Poly_Type<string name, string typeMnemonic> : TypeDef<Poly_Dialect, name> {
+  let mnemonic = typeMnemonic;
+}
+
+def Polynomial : Poly_Type<"Polynomial", "poly"> {
+  let summary = "A polynomial with u32 coefficients";
+
+  let description = [{
+    A type for polynomials with integer coefficients in a single-variable polynomial ring.
+  }];
+  //单变量多项式
+
+  let parameters = (ins "int":$degreeBound);//输入参数是$degreeBound,类型是int，表示多项式的最高次数
+  let assemblyFormat = "`<` $degreeBound `>`";
+}
+
+#endif  // LIB_DIALECT_POLY_POLYTYPES_TD_
+```
+
+**添加操作(Operations)**
+
+```tablegen
+class Poly_BinOp<string mnemonic> : Op<Poly_Dialect, mnemonic, [Pure, ElementwiseMappable, SameOperandsAndResultType]> {
+  //                                  ↑属于Poly_Dialect方言，助记符，pure表示操作无副作用？，
+  //              ElementwiseMappable表示可以逐元素操作，SameOperandsAndResultType表示操作数和结果类型相同
+  let arguments = (ins PolyOrContainer:$lhs, PolyOrContainer:$rhs);
+  //        接受两个输入参数，类型为PolyOrContainer，名称为lhs和rhs
+  let results = (outs PolyOrContainer:$output);
+  let assemblyFormat = "$lhs `,` $rhs attr-dict `:` qualified(type($output))";
+  //例如 ：%result = poly.add %lhs, %rhs, {attributeName = attributeValue} : poly-or-container
+  let hasCanonicalizer = 1;//支持规范化，即支持特定规则对多项式进行简化
+  let hasFolder = 1;//支持合并(折叠)优化
+  let hasCanonicalizer = 1;//支持规范化，即支持特定规则对多项式进行简化
+}
+
+def Poly_AddOp : Poly_BinOp<"add"> {
+  let summary = "Addition operation between polynomials.";
+}
+
+def Poly_SubOp : Poly_BinOp<"sub"> {
+  let summary = "Subtraction operation between polynomials.";
+}
+
+def Poly_MulOp : Poly_BinOp<"mul"> {
+  let summary = "Multiplication operation between polynomials.";
+}
+```
+
+
+
+# [MLIR — Using Traits](https://www.jeremykun.com/2023/09/07/mlir-using-traits/)
+
+* **traits and interfaces(特性与接口)**
+
+`interfaces`好理解，就是将一系列方法、属性封装成类，基于派生、继承、多态等手段，调用抽象的接口。
+
+<del>`traits`是将**类型**关联起来，从而实现类型特征的抽象。例如`C++`中的`template`</del>
+
+好吧，`mlir`语境下，`traits`是指用来描述和约束操作（操作是 MLIR 的基本构建块之一）的特性和行为的特性或属性集。相比于传统的 C++ 或其他编程语言中，MLIR 的 traits 主要用于在编译器级别进行优化和生成代码时提供特定的语义信息。例如`pure`表示操作时无副作用的，`ConstantLike`表示该操作的输出可视为常量。
+
+**Traits and Loop Invariant Code Motion(循环不变量外提)**
+
+循环不变量外提是mlir提供的一个pass，用于将循环中的不变量指令移动到循环外计算，从而减少无效指令的运行。但并不是所有含不变量的指令都能够外提，**外提**需要满足两个条件：①指令是`NoMemoryEffect`，也就是说，指令不对写内存产生影响。(`the operation does not have any side effects related to writing to memory`) ② `AlwaysSpeculatable` 指令可以被编译器推断执行。
+
+`MLIR`提供了一个`Trait`叫`Pure`,它包含了`NoMemoryEffect`和`AlwaysSpeculatable`,我们可以直接给类型的模板(class)添加这个trait：
+
+```tablegen
+class Poly_BinOp<string mnemonic> : Op<Poly_Dialect, mnemonic, [Pure]> {
+```
+
+添加完这些Trait后，tablegen生成的文件中也增加了以下内容
+
+```cpp
+// PolyOps.h.inc
+class SubOp : public ::mlir::Op<SubOp,
+::mlir::OpTrait::ZeroRegions,
+::mlir::OpTrait::OneResult,
+::mlir::OpTrait::OneTypedResult<::mlir::tutorial::poly::PolynomialType>::Impl,
+::mlir::OpTrait::ZeroSuccessors,
+::mlir::OpTrait::NOperands<2>::Impl,
+::mlir::OpTrait::OpInvariants,
+::mlir::ConditionallySpeculatable::Trait,            // <-- new
+::mlir::OpTrait::AlwaysSpeculatableImplTrait,   // <-- new
+::mlir::MemoryEffectOpInterface::Trait>          // <--- new
+{ ... }
+```
+
+```cpp
+// PolyOps.h.inc
+void SubOp::getEffects(
+  ::llvm::SmallVectorImpl<::mlir::SideEffects::EffectInstance<::mlir::MemoryEffects::Effect>> &effects) {
+}
+```
+
+接下来就是讲了一些`Traits` , 例如：`ElementwiseMappable`、`SameOperandsAndResultElementType`、`Involution`、`Idempotent`等，这里没抄了。
+
+# MLIR — Folders and Constant Propagation
+
+**Constant Propagation vs Canonicalization**
+
+常量传播(`Constant Propagation`)：当程序中，一个变量(或一个`operation`)的返回/输出总是一个常量时，可以在之后的程序中用常量替代变量，从而减少编译计算。
+
+规范化(`canonicalize`)也能进行常量折叠，甚至删除死代码(`Constant Propagation`不会删除)。
+
+以下是一个例子：
+
+```mlir
+//  tests/scc[p.mlir
+func.func @test_arith_sccp() -> i32 {
+  %0 = arith.constant 7 : i32
+  %1 = arith.constant 8 : i32
+  %2 = arith.addi %0, %0 : i32
+  %3 = arith.muli %0, %0 : i32
+  %4 = arith.addi %2, %3 : i32
+  return %2 : i32
+}
+```
+
+**tutorial-opt --sccp sccp.mlir**
+
+```mlir
+func.func @test_arith_sccp() -> i32 {
+  %c63_i32 = arith.constant 63 : i32
+  %c49_i32 = arith.constant 49 : i32
+  %c14_i32 = arith.constant 14 : i32
+  %c8_i32 = arith.constant 8 : i32
+  %c7_i32 = arith.constant 7 : i32
+  return %c14_i32 : i32
+}
+```
+
+**tutorial-opt --canonicalize sccp.mlir**
+
+```mlir
+func.func @test_arith_sccp() -> i32 {
+  %c14_i32 = arith.constant 14 : i32
+  return %c14_i32 : i32
+}
+```
+
+`--sccp`和`--canonicalize`都是通过`folding`实现的。
+
+为了支持`Folding`操作，我们需要完善：
+
+* 完善`constant operation`
+* 添加`materialization hook`
+* 为每个`operation`添加`folder`
+
+**constant operation**
+
+之前我们声明一个`poly.poly`类型的量，需要这样两步`SSA`声明：
+
+```mlir
+%0 = arith.constant dense<[1, 2, 3]> : tensor<3xi32>
+%p0 = poly.from_tensor %0 : tensor<3xi32> -> !poly.poly<10>
+```
+
+现在我们想要简化成：
+
+```mlir
+%0 = poly.constant dense<[2, 8, 20, 24, 18]> : !poly.poly<10>
+```
+
+给`constant operation`添加`ConstantLike trait` , 修改`arguments`和`assemblyFormat` :
+
+```mlir
+def Poly_ConstantOp : Op<Poly_Dialect, "constant", [Pure, ConstantLike]> {   // new
+  let summary = "Define a constant polynomial via an attribute.";
+  let arguments = (ins AnyIntElementsAttr:$coefficients);    // new
+  let results = (outs Polynomial:$output);
+  let assemblyFormat = "$coefficients attr-dict `:` type($output)";//new
+}
+```
+
+**Adding folder**
+
+```mlir
+let hasFolder = 1;
+```
+
+并在`PolyOps.cpp`中定义各`Operaion`的`::fold`函数
+
+# [MLIR — Verifiers](https://www.jeremykun.com/2023/09/13/mlir-verifiers/)
+
+**Trait-based Verifiers**
+
+这类`verifies`有着`traits`一样的格式，都是定义在`operation`的定义参数内。
+
+例如`Poly_BinOp`的`SameOperandsAndResultType`,它会去验证(推断)输入输出类型是否相同。以下是Poly_BinOp的前后变化
+
+```git
+- class Poly_BinOp<string mnemonic> : Op<Poly_Dialect, mnemonic, [Pure, ElementwiseMappable]> {
++ class Poly_BinOp<string mnemonic> : Op<Poly_Dialect, mnemonic, [Pure, ElementwiseMappable, SameOperandsAndResultType]> {
+  let arguments = (ins PolyOrContainer:$lhs, PolyOrContainer:$rhs);
+  let results = (outs PolyOrContainer:$output);
+- let assemblyFormat = "$lhs `,` $rhs attr-dict `:` `(` qualified(type($lhs)) `,` qualified(type($rhs)) `)` `->` qualified(type($output))";
++ let assemblyFormat = "$lhs `,` $rhs attr-dict `:` qualified(type($output))";#无需指明输入的类型
+  let hasFolder = 1;
+}
+```
+
+对于操作`Poly_EvalOp`，输入输出一定是不同的，可以使用`Verifies`  `AllTypesMatch`:
+
+```mlir
+def Poly_EvalOp : Op<Poly_Dialect, "eval", [AllTypesMatch<["point", "output"]>]> {
+  let summary = "Evaluates a Polynomial at a given input value.";
+  let arguments = (ins Polynomial:$input, AnyInteger:$point);
+  let results = (outs AnyInteger:$output);
+  let assemblyFormat = "$input `,` $point attr-dict `:` `(` qualified(type($input)) `,` type($point) `)` `->` type($output)";
+}
+```
+
+
+
+
+
+**A custom verifier**
+
+我们可以自己定义`verifier`
+
+```tablegen
+// PolyOps.td
+// Inject verification that all integer-like arguments are 32-bits
+def Has32BitArguments : NativeOpTrait<"Has32BitArguments"> {
+  let cppNamespace = "::mlir::tutorial::poly";
+}
+```
+
+然后在`PolyTraits.h`中实现`Has32BitArguments`
+
+```cpp
+template <typename ConcreteType>
+class Has32BitArguments : public OpTrait::TraitBase<ConcreteType, Has32BitArguments> {
+ public:
+  static LogicalResult verifyTrait(Operation *op) {
+    for (auto type : op->getOperandTypes()) {
+      // OK to skip non-integer operand types
+      if (!type.isIntOrIndex()) continue;
+
+      if (!type.isInteger(32)) {
+        return op->emitOpError()
+               << "requires each numeric operand to be a 32-bit integer";
+      }
+    }
+
     return success();
   }
 };
 ```
 
-The implementation of this rewriter is in `ToyCombine.cpp`. The [canonicalization pass](https://mlir.llvm.org/docs/Canonicalization/) applies transformations defined by operations in a greedy, iterative manner. To ensure that the canonicalization pass applies our new transform, we set [hasCanonicalizer = 1](https://mlir.llvm.org/docs/DefiningDialects/Operations/#hascanonicalizer) and register the pattern with the canonicalization framework.
+# [MLIR — Canonicalizers and Declarative Rewrite Patterns](https://www.jeremykun.com/2023/09/20/mlir-canonicalizers-and-declarative-rewrite-patterns/)
 
-```c++
-// Register our patterns for rewrite by the Canonicalization framework.
-void TransposeOp::getCanonicalizationPatterns(
-    RewritePatternSet &results, MLIRContext *context) {
-  results.add<SimplifyRedundantTranspose>(context);
-}
-```
-
-We also need to update our main file, `toyc.cpp`, to add an optimization pipeline. In MLIR, the optimizations are run through a `PassManager` in a similar way to LLVM:
-
-```c++
-  mlir::PassManager pm(module->getName());
-  pm.addNestedPass<mlir::toy::FuncOp>(mlir::createCanonicalizerPass());
-```
-
-Finally, we can run `toyc-ch3 test/Examples/Toy/Ch3/transpose_transpose.toy -emit=mlir -opt` and observe our pattern in action:
-
-```mlir
-toy.func @transpose_transpose(%arg0: tensor<*xf64>) -> tensor<*xf64> {
-  %0 = toy.transpose(%arg0 : tensor<*xf64>) to tensor<*xf64>
-  toy.return %arg0 : tensor<*xf64>
-}
-```
-
-As expected, we now directly return the function argument, bypassing any transpose operation. However, one of the transposes still hasn’t been eliminated. That is not ideal! What happened is that our pattern replaced the last transform with the function input and left behind the now dead transpose input. The Canonicalizer knows to clean up dead operations; however, MLIR conservatively assumes that operations may have side-effects. We can fix this by adding a new trait, `Pure`, to our `TransposeOp`:
-
-```tablegen
-def TransposeOp : Toy_Op<"transpose", [Pure]> {...}
-```
-
-Let’s retry now `toyc-ch3 test/transpose_transpose.toy -emit=mlir -opt`:
-
-```mlir
-toy.func @transpose_transpose(%arg0: tensor<*xf64>) -> tensor<*xf64> {
-  toy.return %arg0 : tensor<*xf64>
-}
-```
-
-Perfect! No `transpose` operation is left - the code is optimal.
-
-In the next section, we use DRR for pattern match optimizations associated with the Reshape op.
-
-## Optimize Reshapes using DRR [¶](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-3/#optimize-reshapes-using-drr)
-
-Declarative, rule-based pattern-match and rewrite (DRR) is an operation DAG-based declarative rewriter that provides a table-based syntax for pattern-match and rewrite rules:
-
-```tablegen
-class Pattern<
-    dag sourcePattern, list<dag> resultPatterns,
-    list<dag> additionalConstraints = [],
-    dag benefitsAdded = (addBenefit 0)>;
-```
-
-A redundant reshape optimization similar to SimplifyRedundantTranspose can be expressed more simply using DRR as follows:
-
-```tablegen
-// Reshape(Reshape(x)) = Reshape(x)
-def ReshapeReshapeOptPattern : Pat<(ReshapeOp(ReshapeOp $arg)),
-                                   (ReshapeOp $arg)>;
-```
-
-The automatically generated C++ code corresponding to each of the DRR patterns can be found under `path/to/BUILD/tools/mlir/examples/toy/Ch3/ToyCombine.inc`.
-
-DRR also provides a method for adding argument constraints when the transformation is conditional on some properties of the arguments and results. An example is a transformation that eliminates reshapes when they are redundant, i.e. when the input and output shapes are identical.
-
-```tablegen
-def TypesAreIdentical : Constraint<CPred<"$0.getType() == $1.getType()">>;
-def RedundantReshapeOptPattern : Pat<
-  (ReshapeOp:$res $arg), (replaceWithValue $arg),
-  [(TypesAreIdentical $res, $arg)]>;
-```
-
-Some optimizations may require additional transformations on instruction arguments. This is achieved using NativeCodeCall, which allows for more complex transformations either by calling into a C++ helper function or by using inline C++. An example of such an optimization is FoldConstantReshape, where we optimize Reshape of a constant value by reshaping the constant in place and eliminating the reshape operation.
-
-```tablegen
-def ReshapeConstant : NativeCodeCall<"$0.reshape(($1.getType()).cast<ShapedType>())">;
-def FoldConstantReshapeOptPattern : Pat<
-  (ReshapeOp:$res (ConstantOp $arg)),
-  (ConstantOp (ReshapeConstant $arg, $res))>;
-```
-
-We demonstrate these reshape optimizations using the following trivial_reshape.toy program:
-
-```c++
-def main() {
-  var a<2,1> = [1, 2];
-  var b<2,1> = a;
-  var c<2,1> = b;
-  print(c);
-}
-module {
-  toy.func @main() {
-    %0 = toy.constant dense<[1.000000e+00, 2.000000e+00]> : tensor<2xf64>
-    %1 = toy.reshape(%0 : tensor<2xf64>) to tensor<2x1xf64>
-    %2 = toy.reshape(%1 : tensor<2x1xf64>) to tensor<2x1xf64>
-    %3 = toy.reshape(%2 : tensor<2x1xf64>) to tensor<2x1xf64>
-    toy.print %3 : tensor<2x1xf64>
-    toy.return
-  }
-}
-```
-
-We can try to run `toyc-ch3 test/Examples/Toy/Ch3/trivial_reshape.toy -emit=mlir -opt` and observe our pattern in action:
-
-```mlir
-module {
-  toy.func @main() {
-    %0 = toy.constant dense<[[1.000000e+00], [2.000000e+00]]> : tensor<2x1xf64>
-    toy.print %0 : tensor<2x1xf64>
-    toy.return
-  }
-}
-```
-
-As expected, no reshape operations remain after canonicalization.
-
-Further details on the declarative rewrite method can be found at [Table-driven Declarative Rewrite Rule (DRR)](https://mlir.llvm.org/docs/DeclarativeRewrites/).
-
-In this chapter, we saw how to use certain core transformations through always available hooks. In the [next chapter](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-4/), we will see how to use generic solutions that scale better through Interfaces.
+待看，先去看mlir toy tutorial了
 
 
 
 
 
+# [Chapter 1: Toy Language and AST](https://mlir.llvm.org/docs/Tutorials/Toy/Ch-1/)
+
+第一章做了Toy语言的词法分析、语法分析并生成了AST。
+
+`Lexer.h`文件定义了`Lexer`类，用于遍历代码字符串，返回各个词的词法。
+
+`AST.h`定义各个语法树结点，例如`NumberExprAST`、`LiteralExprAST`
+
+`Parser.h`解析代码字符串，根据词法，实例化语法树结点。
+
+# Chapter 2: Esmitting Basic MLIR
+
+第二章讲的主要是`Dialect`的定义，这些都在[mlir-tutorial](https://github.com/j2kun/mlir-tutorial)详尽地描述过，此处不赘述。
+
+我更关心`mlir-generator`，它在`Dialect.cpp`和`MLIRGen.cpp`中实现，但第二章没做任何讲述。
+
+值得注意的是，第二章的`Dialect.cpp`中对操作定义了多个函数，例如`AddOp::build`、`AddOp::parse`、`AddOp::print`，这些在`mlir-tutorial-j2kun`中没有提到，重点来看这些内容。
+
+**Operation::build**
+
+Operation的build方法可以在`tablegen`中定义并自动生成：
 
 
 
+MLIRGEN.cpp中的builder.create()隐式调用了operation::build()方法
+
+dump()方法隐式调用了Operation::print() ， Operation::parse()用于解析Mlir输入
 
 
 
+如果在`Ops.td`中定义了`Operations`的`assemblyFormat`，那么`Ops.cpp.inc`会自动生成该操作的`print`和`parse`方法，而无需在`Dialect.cpp`中定义。
+
+mlir好多源代码都是用tablegen生成的(.inc文件)
+
+# Chapter 4 Enabling Generic Transformation with Interfaces
+
+**==疑问==**：没有找到`CastOp`匹配`generic_call`与`callee`的类型的逻辑代码。
+
+第三章介绍了模式匹配与重写，它需要给每一个操作定义模式重写的逻辑。当需要模式重写的操作有许多时，代码就会变得冗余。MLIR引入了`Interface`来解决这一问题，简单而言，如果多个操作具有相似的模式重写逻辑，那么就可以定义通用的`Interface`实现，再将这一个`Interface`应用于多个Operations即可。
+
+**Inlining**
+
+对于大多数函数而言，内联这一模式重写的逻辑是相似或一致的
 
 
 
+# 相关资料
 
+[HCL-Dialect作者写的介绍，放在cs6120的官网上](https://www.cs.cornell.edu/courses/cs6120/2023fa/blog/hcl-amc/)
 
+[知乎文章解析Mlir toy tutorial](https://zhuanlan.zhihu.com/p/642136872)
 
+[这个人的知乎有mlir教程的翻译](https://www.zhihu.com/column/c_1416415517393981440)
 
+[nelli: A lightweight frontend for MLIR (arxiv.org)](https://arxiv.org/pdf/2307.16080)
 
+[知乎一个学习路线](https://www.zhihu.com/question/435109274/answer/3585914452?utm_psn=1836912627655262208)
 
+[在mlir toy tutorial的基础上添加MatMul Operation教程](https://zhuanlan.zhihu.com/p/647544289)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+[一个人的llvm学习笔记](https://llvm-study-notes.readthedocs.io/en/latest/)
 
