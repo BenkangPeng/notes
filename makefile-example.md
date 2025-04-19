@@ -75,3 +75,77 @@ clean:
 .PHONY:all run debug clean
 ```
 
+
+
+### 更好的`makefile` 规范：
+
+```makefile
+CC = g++
+CXXFLAGS = -std=c++11 -fno-elide-constructors -Wall
+OPTIMIZE_FLAGS = -O0
+
+#declaration in .hpp and defination in .cpp strictly
+#SRC equal to all the .cpp file
+SRC = redundant-constructor.cpp StringVector.cpp main.cpp emplace_back.cpp
+
+#Replace the file suffix ".cpp" of the files in SRC with ".o".
+OBJ = $(SRC:.cpp=.o)
+
+# executable file
+EXE1 = redundant-constructor
+EXE2 = emplace_back
+MAIN_EXE = main
+
+# put all the executable target in `all`
+all: $(EXE1) $(EXE2) $(MAIN_EXE)
+
+# Linking the executable
+$(EXE1): redundant-constructor.o StringVector.o
+	$(CC) $(CXXFLAGS) $(OPTIMIZE_FLAGS) -o $@ $^
+
+$(EXE2): emplace_back.o
+	$(CC) -std=c++17 $(OPTIMIZE_FLAGS) -o $@ $^
+
+
+$(MAIN_EXE): main.o StringVector.o
+	$(CC) $(CXXFLAGS) $(OPTIMIZE_FLAGS) -o $@ $^
+
+
+# Compile each .cpp files into .o files
+%.o: %.cpp
+	$(CC) $(CXXFLAGS) $(OPTIMIZE_FLAGS) -c $< -o $@
+
+# special version request
+emplace_back.o: emplace_back.cpp
+	$(CC) -Wall -std=c++17 -c $< -o $@
+
+# Clean up generated files
+clean:
+	rm -f *.o *.exe
+
+# Phony targets 
+.PHONY: all clean
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

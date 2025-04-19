@@ -4,13 +4,15 @@
 
 ![1712057138429](images/7f3393cd3537a578503b5771f32153c2ed1efba6.png)
 
-* ### 取消VMnet8(NAT模式)的DHCP服务
+* ### <del>取消VMnet8(NAT模式)的DHCP服务</del>
+
+<p style="color: red;">勘误：Error:关闭DHCP后虚拟机无法连接网络，且无法连接 </p>
 
 选择vmware菜单栏中的【编辑】->【虚拟网络编辑器】, 关闭VMnet8的DHCP服务
 
 ![1712057618254](images/70eccfbf28fc9f971655165833ae6291fa909c43.png)
 
-* ### 点击上图中的**NAT设置**
+* ### 点击上图中的**`NAT设置`**
 
 ![1712057711477](images/d6112dcd7026b95f792ca1ea609bee7d2b8400cd.png)
 
@@ -126,3 +128,15 @@ NAT模式通过虚拟网络适配器将虚拟机联网，它允许虚拟机共�
 ４.　**设置DNS的作用是什么？**
 
 DNS（Domain Name System）负责将域名转换为IP地址。在网络设置中配置DNS服务器，可以让虚拟机在访问网络资源时，能够解析和访问到正确的IP地址，它是网络访问的核心部分之一。
+
+
+
+### 解决centos ip变动的问题
+
+在windows端连接vmware中的centos时，会发现过一段时间后ip会变化。
+
+这是因为启用了`使用本地DHCP服务将IP地址分配给虚拟机（D）`, 可以限制DHCP ip的范围与更新时间，避免频繁更换ip
+
+![image-20250119125425613](images/image-20250119125425613.png)
+
+![image-20250119125445871](images/image-20250119125445871.png)
