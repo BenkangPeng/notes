@@ -735,6 +735,8 @@ int main() {
 
 ### CRTP(Curiously recurring template pattern)
 
+将派生类作为模板参数传入基类
+
 [reference](https://www.geeksforgeeks.org/curiously-recurring-template-pattern-crtp-2/)
 
 以下的例子展示了当虚函数被大量调用时所带来的开销：
@@ -824,7 +826,7 @@ When a method is declared virtual, compiler secretly does two things for us:
 
 
 
-**采用CRTP方法来实现多态** ：
+**采用CRTP方法来实现静态多态，减去虚函数表的动态开销** ：
 
 ```cpp
 // Image program (similar to above) to demonstrate
@@ -918,16 +920,69 @@ Time taken: 732 nanoseconds
 ```
 
 * `Image<TiffImage>* pImage = new TiffImage;`  
+* 传入基类`Image`的模板参数为`TiffImage`，那么`pImage`的`draw()`函数为`static_cast<TiffImage*>(this)->Draw();`
 
 执行`pImage->Draw();`时，编译器会先找`Image`类，执行`Image::Draw()`  : `static_cast<TiffImage*>(this)->GetDimensionInPixels();`将`this`指针转成`TiffImage*`型，再去访问`TiffImage::GetDimensionInPixels()`
 
 * CRTP是静态绑定，它通过模板实现多态，在编译时就已经确定了要调用的具体函数，而不是在运行时。
 
+**CRTP实现类计数**
 
+```cpp
+#include<iostream>
+template<typename CountedType>
+class objectCounter{
+public:
+    inline static std::size_t count = 0;//必须加上inline才能在类中对静态变量赋值
 
+    objectCounter(){
+        ++count;
+    }
 
+    objectCounter(objectCounter<CountedType> const&){
+        ++count;
+    }
 
+    objectCounter(objectCounter<CountedType> const&& ){
+        ++count;
+    }
 
+    ~objectCounter(){
+        --count;
+    }
+
+public:
+    static std::size_t live(){
+        return count;
+    }
+};
+
+template<typename CharT>
+class MyString : public objectCounter< MyString<CharT> >{
+public:
+    MyString(){}
+
+    ~MyString(){}
+};
+int main(){
+    MyString<char> s1, s2;
+
+    MyString<char> s3(s2);
+
+    MyString<wchar_t> ws1, ws2;
+    
+    std::cout << "num of MyString<char>: " << MyString<char>::live() << '\n';
+    std::cout << "num of MyString<wchar_t>: " << MyString<wchar_t>::live() << '\n';
+}
+```
+
+`objectCounter`是接受一个模板参数`CountedType`的计数器。它用于记录`CountedType`这个类的实例个数。
+
+`MyString`是一个自定义的字符串class，接受一个字符类型`CharT`作为模板参数。它继承自`objectCounter< MyString<CharT> >`，使得`objectCounter`可以对`MyString<CharT>`进行计数。
+
+模板的实例化：理解这个问题时， 可以想象编译器会实例化哪些模板。`MyString<char>`会实例化两个模板：`objectCounter<MyString<char>>` and `MyString<char>`。调用`MyString<char>`的构造函数后，会隐式调用`objectCounter< MyString<char>>`的构造函数，从而使`MyString<char>>::count`加一。
+
+类的实例化：`MyString<char>`继承自`objectCounter< MyString<char>>` , 因此`MyString<char>`的构造函数、拷贝构造函数、移动构造函数、析构函数都会隐式调用父类相应的函数，从而实现类的实例计数。
 
 
 
