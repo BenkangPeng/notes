@@ -110,8 +110,3 @@ int main() {
 
 [MLSys 入门向读书笔记\] CUDA by Example: An Introduction to General-Purpose GPU Programming（下） - 知乎](https://zhuanlan.zhihu.com/p/718988880)
 
-
-
-$\sqrt(\frac{32ln\frac{em}{2}+8ln\frac{4}{\delta}}{m})$
-
-$m \geq \frac{4}{\epsilon}ln\frac{4}{\delta}$

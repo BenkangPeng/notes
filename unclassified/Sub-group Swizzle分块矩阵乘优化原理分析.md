@@ -6,7 +6,7 @@
 
 #### 分块矩阵乘法
 
-![[native matmul.png]]
+![native matmul.png](images/native matmul.png)
 上图表示的是$A \times B = C$的矩阵乘法，假设三个矩阵$A,B，C$为大小相等的方形矩阵，每一个矩阵可以分为$5\times 5$个分块。以下是为每一个分块分配一个`threadblock`并行计算`C`矩阵的`triton`核函数。
 
 ```python
@@ -29,7 +29,7 @@ def matmul_row_wise(...):
 
 `Sub-group Swizzle Block Matmul`分为两步：①将多个**分块行**分为一个`sub-group`；②更改`threadblockIdx`在结果矩阵`C`上的排列顺序。
 
-![[sub-group swizzle matmul.png]]
+![[sub-group swizzle matmul.png]](images/sub-group swizzle matmul.png)
 
 如图二所示，在一个分组中，`threadblockIdx`按照如图所示的折线分布。例如在一个大小为2的分组中，`threadblockIdx`按照`(0,0)，(1,0)，(0,1)，(1,1)`的顺序递增，在下一个分组中，`threadblockIdx`按照`(2,0),(3,0),(2,1),(3,1)`的顺序递增。以下为这种算法的`triton`实现：
 
@@ -75,7 +75,7 @@ __device__ unsigned int smid(void)
 ```
 
 例如，`GeForce 4090 GPU`有9个完整的`GPC(Graph Process cluster`(每个GPC含有12个SM)，2个不完整的`GPC`(每个GPC含10个SM)，共$9\times12+2\times10=128$个SM。在实验程序中，由于资源限制，单个`SM`最多同时并行2个`threadblock`(`residency=2`)下图为`GeForce RTX 4090`中`SM`与`threadblock`之间的映射关系。
-![[The mapping relationship between SMs and thread blocks on NVIDIA GeForce RTX 4090.png]]
+![[The mapping relationship between SMs and thread blocks on NVIDIA GeForce RTX 4090.png]](images/The mapping relationship between SMs and thread blocks on NVIDIA GeForce RTX 4090.png)
 如上图所示，`0~127`号`threadblock`被依次映射到`0,0,2,2,4,4,6,6......126,126`号`SM`上，`128~143`号`threadblock`被依次映射到`1,1,3,3,5,5......15,15`号`SM`上，`144~199`号`threadblock`被依次映射到`17,19......127`号`SM`上，`200~255`号`threadblock`被依次映射到`17,19......127`号`SM`。`threadblockIdx`大于255的`threadblock`等待`SM`资源的释放，一旦`SM`空闲，则将`threadblock`映射到空闲的`SM`上。
 
 我们称第一次调度中，将尽可能多的`threadblock`映射到`SMs`上，占满`SM`，为`the first wave`(第一波调度)[4]。所有SM被占满后，采用贪心调度策略(Greedy Schedule)将`threadblock`映射到`SM`，即一旦有SM空闲，立刻将`threadblock`映射上。使用如下设备端函数测出各线程块发射时间：
@@ -87,7 +87,7 @@ __device__ unsigned long long globaltime(void)
     return time;
 }
 ```
-![[the first wave and Greedy Schedule.jpg]]
+![[the first wave and Greedy Schedule.jpg]](images/the first wave and Greedy Schedule.jpg)
 
 由上图可知，由于GPU SM资源限制，GPU不能同时发射所有的`threadblocks`，因此不同批次发射到`SM`上的`threadblocks`之间存在串行关系。接下来分析不同批次的`threadblock`之间如何通过分组`swizzle`优化`L2 cache`命中率。
 
@@ -99,7 +99,7 @@ __device__ unsigned long long globaltime(void)
 * `NVIDIA GeForce RTX 4090` `L2 cache`为`72MB`，为便于分析，假设`L2 cache`容量正好能够缓存住256个`threadblock`计算所需的数据量。
 * 假设每一批次的所有`threadblock`同时结束。虽然一般来说，矩阵乘法中每个`threadblock`计算的数据量相同，但是各`threadblock`的耗时可能不是严格相等。为便于分析，此处做近似分析，下一节做补充说明。
 
-![[row wise 256blocks.jpg]]
+![[row wise 256blocks.jpg]](images/row wise 256blocks.jpg)
 上图展示了按照行主序设置`threadblockIdx`的计算流程：①`C0`表示第一批同时启动的256个`ThreadBlocks`。256个`threadblocks`同时读取`A0(一行分块)`，GPU会将其合并为一次读操作；256个`threadBlocks`一共需要读取`B0(256列分块)`。那么`C0`中256个`threadblocks`完成计算总共需要从`Global Memory`中读257行分块。此时，`A0`和`B0`被缓存在L2 cache中。②`C1`中256个`threadblocks`需要读`A0`和`B1`。`A0`被缓存在L2 Cache中，不需要从Global Memory中读取。`B1`需要从Global Memory读取。C1完成计算需要从Global Memory中读取256行分块(忽略从L2 Cache中读取A0的开销，因为L2 Cache速度远快于Global Memory)。此时A0和B1被缓存在L2 Cache中(B0被替换)。同理，③C2完成计算需要从Global Memory中读取257行分块；④C3完成计算需要从Global Memory中读取257行分块。
 
 综上，4批`threadblocks`完成计算，依次需要从Global Memory读取的数据量：257行分块$\rightarrow$ 256 $\rightarrow$ 257 $\rightarrow$ 256。
@@ -125,18 +125,13 @@ __device__ unsigned long long globaltime(void)
 
 下图是两种不同的`threadblockIdx`编排顺序的算法性能对比图。当矩阵规模较小时，两种算法性能接近，在大规模矩阵乘时，`sub-group swizzle`比`row-wise`性能大约高2倍。
 
-![[row-wise vs sub-group swizzle.png]]
+![[row-wise vs sub-group swizzle.png]](images/row-wise vs sub-group swizzle.png)
 `L2 Cache Hit rate`对比：
 ![[L2 cache hit rate compare.png]]
 小规模矩阵乘法中，因为`4090 GPU` L2 Cache足够大(72MB)，能够缓存住所有的数据，两种算法的L2 cache命中率都很高。大规模矩阵乘法中，两种算法有明显差异，`M,K,N=16384`下，两种算法的L2 cache命中率分别为`83.22%, 95.70%`，`M,K,N=32768`规模下分别为`83.28%, 95.64%`。
 
 经过`triton tuning`后，`sub-group swizzle`矩阵乘与`cuBLAS`性能对比图。
-![[tuning triton vs cublas.png]]
-
-
-### 团队分工
-* 彭奔康：选题、原理分析、triton&cuBLAS对比、实验报告
-* 章柯威：CUDA代码编写、画图、 ncu性能评估、实验报告
+![[tuning triton vs cublas.png]](images/tuning triton vs cublas.png)
 
 
 ### 参考文献
@@ -146,18 +141,3 @@ __device__ unsigned long long globaltime(void)
 [3] https://github.com/NVIDIA/cutlass/issues/1017
 [4] https://cs.rochester.edu/%7Esree/fermi-tbs/fermi-tbs.html
 [5] Yang J, Wen M, Chen D, et al. HyFiSS: A Hybrid Fidelity Stall-Aware Simulator for GPGPUs[C]//2024 57th IEEE/ACM International Symposium on Microarchitecture (MICRO). IEEE, 2024: 168-185.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
