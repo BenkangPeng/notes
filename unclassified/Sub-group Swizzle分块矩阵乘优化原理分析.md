@@ -104,7 +104,7 @@ __device__ unsigned long long globaltime(void)
 
 综上，4批`threadblocks`完成计算，依次需要从Global Memory读取的数据量：257行分块$\rightarrow$ 256 $\rightarrow$ 257 $\rightarrow$ 256。
 
-![[sub-group swizzle 256 blocks.png]]
+![](images/sub-group swizzle 256 blocks.png)
 上图展示了分组大小为2，按照折线顺序编排`threadblockIdx`的计算流程：①`C0`表示第一批同时启动的256个`ThreadBlocks`。256个`threadblocks`同时读取`A0(一行分块)`，GPU会将其合并为一次读操作；256个`threadBlocks`一共需要读取`B0(256列分块)`。那么`C0`中256个`threadblocks`完成计算总共需要从`Global Memory`中读257行分块。此时，`A0`和`B0`被缓存在L2 cache中。②`C1`中256个`threadblocks`需要读`A1`和`B0`。`B0`被缓存在L2 Cache中，不需要从Global Memory中读取。`A1`需要从Global Memory读取。C1完成计算需要从Global 1行分块(忽略从L2 Cache中读取B0的开销，因为L2 Cache速度远快于Global Memory)。此时A1和B0被缓存在L2 Cache中(A0被替换)。同理，③C2完成计算需要从Global Memory中读取257行分块；④C3完成计算需要从Global Memory中读取1行分块。
 
 综上，4批`threadblocks`完成计算，依次需要从Global Memory读取的数据量：257行分块$\rightarrow$ 1 $\rightarrow$ 257 $\rightarrow$ 1。
@@ -113,7 +113,7 @@ __device__ unsigned long long globaltime(void)
 
 ##### 同一批线程块的发射顺序
 同一批线程块的发射顺序并不是严格并行的，而是大致上按照`threadblockIdx`的顺序发射(但不是严格顺序)，如下图所示[5]：
-![[Time-View of CTA Scheduling Across SMs.png]]
+![Time-View of CTA Scheduling Across SMs.png](images/Time-View of CTA Scheduling Across SMs.png)
 可以得出经验性的结论：让`threadblockIdx`相邻的线程块访问相邻地址的数据，更有可能提高`L2 Cache`命中率。
 
 #### 实验：性能比较
@@ -127,7 +127,7 @@ __device__ unsigned long long globaltime(void)
 
 ![[row-wise vs sub-group swizzle.png]](images/row-wise vs sub-group swizzle.png)
 `L2 Cache Hit rate`对比：
-![[L2 cache hit rate compare.png]]
+![[L2 cache hit rate compare.png]](images/L2 cache hit rate compare.png)
 小规模矩阵乘法中，因为`4090 GPU` L2 Cache足够大(72MB)，能够缓存住所有的数据，两种算法的L2 cache命中率都很高。大规模矩阵乘法中，两种算法有明显差异，`M,K,N=16384`下，两种算法的L2 cache命中率分别为`83.22%, 95.70%`，`M,K,N=32768`规模下分别为`83.28%, 95.64%`。
 
 经过`triton tuning`后，`sub-group swizzle`矩阵乘与`cuBLAS`性能对比图。

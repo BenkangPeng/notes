@@ -14,12 +14,29 @@ cmake -S ../llvm -G Ninja -DLLVM_ENABLE_PROJECTS="clang;lld;mlir;clang-tools-ext
 $ llvm-config --version
 21.0.0git
 $ which llvm-config
-
 ```
 
 ### TVM构建
 
 按照`TVM`官方教程 [Install from Source — tvm 0.20.dev0 documentation](https://tvm.apache.org/docs/install/from_source.html)
+
+往`config.cmake`中加入的内容
+
+```
+set(CMAKE_BUILD_TYPE RelWithDebInfo)
+set(USE_LLVM "/home/pengbenkang/github/LLVM/build/bin/llvm-config --ignore-libllvm --link-static")
+set(HIDE_PRIVATE_SYMBOLS ON)
+set(USE_CUDA   ON)
+set(USE_METAL  OFF)
+set(USE_VULKAN OFF)
+set(USE_OPENCL OFF)
+set(USE_CUBLAS ON)
+set(USE_CUDNN  ON)
+set(USE_CUTLASS ON)
+set(CMAKE_CUDA_ARCHITECTURES "native")
+```
+
+其中`USE_LLVM`要设置为本地构建的`llvm`，否则编译时报`llvm`的错
 
 编译的最后还会提醒要安装`Cython`
 
@@ -30,6 +47,8 @@ $ which llvm-config
 ```
 set(CMAKE_CUDA_ARCHITECTURES "native")
 ```
+
+* 仍有错误，记得更新三方库
 
 ### Jupyter使用
 
@@ -47,8 +66,6 @@ set(CMAKE_CUDA_ARCHITECTURES "native")
 PYTHONPATH=/home/<yourname>/github/tvm/python:$PYTHONPATH
 ```
 
-
-
 **在jupyter中使用tvm.build将模型部署到GPU爆nvcc与gcc版本错误**
 
 在`jupyter`中运行`!gcc --version`显示的还是`7.3`版本。将`gcc 9`加入`.env`中：
@@ -58,8 +75,6 @@ CC=/opt/rh/devtoolset-9/root/usr/bin/gcc
 CXX=/opt/rh/devtoolset-9/root/usr/bin/g++
 PATH=/opt/rh/devtoolset-9/root/usr/bin:${PATH}
 ```
-
-
 
 `miniconda`安装不需要手动把`miniconda`加到`PATH`，安装后会自动在`.bashrc`中加：
 
@@ -96,13 +111,9 @@ custom_channels:
   pytorch: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud  
 ```
 
-
-
 ## Machine Learning Compilation课程学习
 
 [MLC | Schedule](https://mlc.ai/summer22/schedule)
-
-
 
 ### 2. Tensor Program Abstraction
 
@@ -162,10 +173,6 @@ sch.mod.show()
 sch.decompose_reduction()
 ```
 
-
-
-### 3. 
+### 3.
 
 陈天奇老师的B站课程看完了前7课，先放一下，看点源码
-
-
